@@ -1,0 +1,25 @@
+name: CI
+
+on:
+  push:
+    branches: ["*"]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: windows-latest
+    env:
+      PYTHONPATH: ${{ github.workspace }}\src
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.9"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if (Test-Path requirements.txt) { pip install -r requirements.txt }
+      - name: Run unit tests
+        run: python -m unittest tests.test_timeline_service tests.test_file_repository
+      - name: Run CLI smoke test
+        run: python scripts/smoke_timeline.py --tick 2000 --lead 3000 --early
