@@ -62,13 +62,11 @@ PvZ 时间轴播报器（桌面端 / Python + PyQt6）
 
 from __future__ import annotations
 
-import csv
-import io
 import sys
 import threading
 import queue
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import List, Optional
 
 # -------------------------------
 # 可选依赖的“安全导入”（失败不报错，后面做功能降级）
@@ -80,83 +78,14 @@ except Exception:  # 未安装或初始化失败
     pyttsx3 = None
     _HAS_TTS = False
 
-try:
-    import pandas as pd  # 读取 Excel 使用
-    _HAS_PANDAS = True
-except Exception:
-    pd = None
-    _HAS_PANDAS = False
-
 # PyQt6 为必需依赖，如缺失应直接报错提示安装
 from PyQt6 import QtCore, QtGui, QtWidgets
 import time
 from opencv_timer_agent import OcrTimerAgent, Roi, parse_roi_string
 from core.domain import TimelineEvent, parse_time_to_ms, format_ms_to_clock
+from core.ports import TimelineRepository
 from core.services import TimelineService
-
-# -----------------------------------------------------------
-# 表头辅助：兼容中文/英文列名
-# -----------------------------------------------------------
-
-def _normalize_header(name: str) -> str:
-    text = str(name or "").replace("\ufeff", "").strip().lower()
-    return "".join(text.split())
-
-
-_HEADER_ALIASES = {
-    "time": ["time", "时间"],
-    "action": ["action", "动作"],
-    "population": ["人口", "supply", "population"],
-    "note": ["备注", "说明", "备注信息", "注释", "remark", "note", "notes"],
-}
-
-
-def _resolve_header(norm_map: Dict[str, str], key: str) -> Optional[str]:
-    for alias in _HEADER_ALIASES.get(key, []):
-        norm = _normalize_header(alias)
-        if norm in norm_map:
-            return norm_map[norm]
-    return None
-
-# -----------------------------------------------------------
-# 文本读取（CSV/TXT）自动识别编码 + 分隔符嗅探
-# -----------------------------------------------------------
-
-def _read_text_autoenc(path: Path) -> tuple[str, str, bool]:
-    """以多种编码尝试读取文本，返回 (text, encoding, warned)。
-
-    - 优先尝试常见编码：utf-8, utf-8-sig, gbk/cp936, big5, shift_jis/cp932, cp1252, latin-1
-    - 若均失败，则使用 latin-1 强行解码并返回 warned=True（提示可能出现乱码）
-    """
-    tried = [
-        "utf-8", "utf-8-sig",
-        "gbk", "cp936",
-        "big5",
-        "shift_jis", "cp932",
-        "cp1252",  # Windows “ANSI”，0x96 常为 – (EN DASH)
-        "latin-1",
-    ]
-    data = path.read_bytes()
-    for enc in tried:
-        try:
-            return data.decode(enc), enc, False
-        except Exception:
-            pass
-    # 兜底：latin-1 强解，返回 warned=True
-    return data.decode("latin-1", errors="replace"), "latin-1", True
-
-
-def _open_csv_stringio_guess(text: str):
-    """使用 csv.Sniffer 自动嗅探分隔符，返回 (reader, dialect)。"""
-    import csv as _csv
-    # 取前 4KB 用于嗅探
-    sample = text[:4096]
-    try:
-        dialect = _csv.Sniffer().sniff(sample, delimiters=",;	|")
-    except Exception:
-        # 默认按逗号
-        dialect = _csv.excel
-    return _csv, dialect
+from infra.file_repository import FileTimelineRepository
 
 # ===========================================================
 # 表格模型：将事件列表绑定到 QTableView
@@ -411,13 +340,18 @@ class MainWindow(QtWidgets.QMainWindow):
     菜单：打开文件、导出示例 CSV、置顶窗口、退出。
     """
 
-    def __init__(self):
+    def __init__(
+        self,
+        timeline: Optional[TimelineService] = None,
+        repository: Optional[TimelineRepository] = None,
+    ):
         super().__init__()
         self.setWindowTitle("时间轴播报器（PvZ 战术计时）")
         self.resize(1000, 620)
 
         # ---- 运行时状态 ----
-        self.timeline = TimelineService(global_lead_ms=2000)
+        self.timeline = timeline or TimelineService(global_lead_ms=2000)
+        self.repository: TimelineRepository = repository or FileTimelineRepository()
         self.model: Optional[TimelineModel] = None
         self._last_tick: float = 0.0
 
@@ -688,137 +622,6 @@ class MainWindow(QtWidgets.QMainWindow):
             self._set_active_flow(first_item.text())
 
         self.status_lbl.setText(f"已加载：{path.name}（{len(flows)} 个流程）")
-
-    def _read_flows_from_file(self, path: Path) -> Dict[str, List[TimelineEvent]]:
-        """根据后缀选择解析器，返回 {流程名: 事件列表}。"""
-        flows: Dict[str, List[TimelineEvent]] = {}
-        suffix = path.suffix.lower()
-
-        if suffix in (".csv", ".txt"):
-            events = self._read_csv_like(path)
-            flows[path.stem] = events
-            return flows
-
-        if suffix in (".xlsx", ".xls"):
-            if not _HAS_PANDAS:
-                raise RuntimeError("读取 Excel 需要安装 pandas 与 openpyxl：\n  pip install pandas openpyxl")
-            # 读取所有 Sheet；每个 sheet 一个流程
-            xls = pd.read_excel(path, sheet_name=None)
-            for sheet, df in xls.items():
-                events = self._events_from_dataframe(df)
-                if events:
-                    flows[f"{path.stem}/{sheet}"] = events
-            return flows
-
-        raise RuntimeError("仅支持 CSV/TXT/XLSX/XLS")
-
-    def _read_csv_like(self, path: Path) -> List[TimelineEvent]:
-        """按 CSV 读取（TXT 也按 CSV 读取）。
-
-        - 自动识别编码（解决 'utf-8' codec can't decode byte 0x96 ...）
-        - 自动嗅探分隔符（逗号/分号/制表符/竖线）
-        - 需要表头至少包含：time, action
-        """
-        # 1) 自动识别编码
-        text, encoding, warned = _read_text_autoenc(path)
-
-        # 2) 用 StringIO + csv.Sniffer 解析
-        sio = io.StringIO(text)
-        _csv, dialect = _open_csv_stringio_guess(text)
-        reader = _csv.DictReader(sio, dialect=dialect)
-        headers = reader.fieldnames or []
-        norm_map = {_normalize_header(h): h for h in headers}
-
-        time_col = _resolve_header(norm_map, "time")
-        action_col = _resolve_header(norm_map, "action")
-        if not time_col or not action_col:
-            raise RuntimeError("CSV/TXT 需包含表头：时间,动作（可选：人口/备注）")
-        pop_col = _resolve_header(norm_map, "population")
-        note_col = _resolve_header(norm_map, "note")
-
-        events: List[TimelineEvent] = []
-        for row in reader:
-            try:
-                t_ms = parse_time_to_ms(str(row.get(time_col, "")))
-                action = str(row.get(action_col, "")).strip()
-                if not action:
-                    continue
-                population = None
-                if pop_col:
-                    pop_raw = str(row.get(pop_col, "")).strip()
-                    population = pop_raw or None
-                note = None
-                if note_col:
-                    note_raw = str(row.get(note_col, "")).strip()
-                    note = note_raw or None
-                events.append(
-                    TimelineEvent(
-                        time_ms=t_ms,
-                        action=action,
-                        population=population,
-                        note=note,
-                    )
-                )
-            except Exception as e:
-                print(f"[CSV] 跳过一行：{e}")
-
-        # 4) 若非 UTF-8/被强制解码，给出一次友好提示（此处直接内联字符串，避免 msg 变量）
-        if warned:
-            QtWidgets.QMessageBox.warning(
-                self,
-                "编码提示",
-                f"文件以 {encoding} 解码，部分字符可能显示异常。\n建议使用 UTF-8 保存以获得最佳兼容。",
-            )
-
-        events.sort(key=lambda e: e.time_ms)
-        return events
-
-
-    def _events_from_dataframe(self, df) -> List[TimelineEvent]:
-        """从 pandas.DataFrame 中提取事件列表（Excel 使用）。"""
-        norm_map = {_normalize_header(c): c for c in df.columns}
-        time_col = _resolve_header(norm_map, "time")
-        action_col = _resolve_header(norm_map, "action")
-        if not time_col or not action_col:
-            return []
-        pop_col = _resolve_header(norm_map, "population")
-        note_col = _resolve_header(norm_map, "note")
-
-        events: List[TimelineEvent] = []
-        for _, row in df.iterrows():
-            t_val = row[time_col]
-            a_val = row[action_col]
-            if pd.isna(t_val) or pd.isna(a_val):
-                continue
-            try:
-                t_ms = parse_time_to_ms(str(t_val))
-                action = str(a_val).strip()
-                if not action:
-                    continue
-                population = None
-                if pop_col:
-                    pv = row.get(pop_col)
-                    if pv is not None and not pd.isna(pv):
-                        pop_str = str(pv).strip()
-                        population = pop_str or None
-                note = None
-                if note_col:
-                    nv = row.get(note_col)
-                    if nv is not None and not pd.isna(nv):
-                        note_str = str(nv).strip()
-                        note = note_str or None
-                events.append(
-                    TimelineEvent(
-                        time_ms=t_ms,
-                        action=action,
-                        population=population,
-                        note=note,
-                    )
-                )
-            except Exception as e:
-                print(f"[XLSX] 跳过一行：{e}")
-        events.sort(key=lambda e: e.time_ms)
-        return events
 
     # ---------- 切换流程/双击开始 ----------
     def _set_active_flow(self, name: str):

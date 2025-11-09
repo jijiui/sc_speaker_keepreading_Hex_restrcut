@@ -52,8 +52,8 @@ def _ensure_app() -> QtWidgets.QApplication:
 
 
 def _run_uc01(window, csv_path: Path) -> Tuple[UCResult, List[Any]]:
-    events = window._read_csv_like(csv_path)
-    flows = window._read_flows_from_file(csv_path)
+    flows = window.repository.load(csv_path)
+    events = next(iter(flows.values()), [])
     if events and len(flows) == 1:
         detail = f"加载 {csv_path.name} 成功：{len(events)} 条事件"
         return UCResult("UC-01", "PASS", detail), events
@@ -63,7 +63,7 @@ def _run_uc01(window, csv_path: Path) -> Tuple[UCResult, List[Any]]:
 
 def _run_uc02(window, xlsx_path: Path) -> UCResult:
     try:
-        flows = window._read_flows_from_file(xlsx_path)
+        flows = window.repository.load(xlsx_path)
         if len(flows) >= 2 and all(len(evs) for evs in flows.values()):
             return UCResult(
                 "UC-02",
