@@ -83,9 +83,10 @@ from PyQt6 import QtCore, QtGui, QtWidgets
 import time
 from opencv_timer_agent import OcrTimerAgent, Roi, parse_roi_string
 from core.domain import TimelineEvent, parse_time_to_ms, format_ms_to_clock
-from core.ports import TimelineRepository
+from core.ports import PreferenceStore, TimelineRepository
 from core.services import TimelineService
 from infra.file_repository import FileTimelineRepository
+from infra.qsettings_store import QtPreferenceStore
 
 # ===========================================================
 # 表格模型：将事件列表绑定到 QTableView
@@ -344,6 +345,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self,
         timeline: Optional[TimelineService] = None,
         repository: Optional[TimelineRepository] = None,
+        preference_store: Optional[PreferenceStore] = None,
     ):
         super().__init__()
         self.setWindowTitle("时间轴播报器（PvZ 战术计时）")
@@ -352,6 +354,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # ---- 运行时状态 ----
         self.timeline = timeline or TimelineService(global_lead_ms=2000)
         self.repository: TimelineRepository = repository or FileTimelineRepository()
+        self.prefs: PreferenceStore = preference_store or QtPreferenceStore()
         self.model: Optional[TimelineModel] = None
         self._last_tick: float = 0.0
 
@@ -898,33 +901,31 @@ class MainWindow(QtWidgets.QMainWindow):
 
     # ---------- OCR 自动计时（初始化与桥接） ----------
     def _init_ocr_agent(self):
-        # Settings: persist ROI and auto checkbox
-        self.settings = QtCore.QSettings("sc_speaker", "pvz_timeline")
         self.ocr_agent = OcrTimerAgent(self, interval_ms=200, scale=3, score_thresh=0.55)
         # 初始未锁定识别
         self.ocr_locked = False
 
         # Restore settings
         try:
-            roi_str = self.settings.value("ocr/roi", "", type=str)
+            roi_str = self.prefs.get_str("ocr/roi", "")
         except Exception:
             roi_str = ""
         if roi_str:
             if self.ocr_agent.set_roi_from_string(roi_str):
                 self.roi_edit.setText(roi_str)
         try:
-            auto_on = bool(self.settings.value("ocr/auto", False, type=bool))
+            auto_on = self.prefs.get_bool("ocr/auto", False)
         except Exception:
             auto_on = False
         self.auto_chk.setChecked(auto_on)
 
         # Restore broadcast options
         try:
-            on_time_on = bool(self.settings.value("opt/on_time", True, type=bool))
+            on_time_on = self.prefs.get_bool("opt/on_time", True)
         except Exception:
             on_time_on = True
         try:
-            early_on = bool(self.settings.value("opt/early", False, type=bool))
+            early_on = self.prefs.get_bool("opt/early", False)
         except Exception:
             early_on = False
         try:
@@ -955,7 +956,7 @@ class MainWindow(QtWidgets.QMainWindow):
         text = self.roi_edit.text().strip()
         ok = self.ocr_agent.set_roi_from_string(text)
         if ok:
-            self.settings.setValue("ocr/roi", text)
+            self.prefs.set_str("ocr/roi", text)
             # ROI 变化后需重新锁定
             self.ocr_locked = False
         self._sync_ocr_agent_enabled()
@@ -963,13 +964,13 @@ class MainWindow(QtWidgets.QMainWindow):
     def _on_roi_selected(self, x: int, y: int, w: int, h: int):
         s = f"{x},{y},{w},{h}"
         self.roi_edit.setText(s)
-        self.settings.setValue("ocr/roi", s)
+        self.prefs.set_str("ocr/roi", s)
         # ROI 变化后需重新锁定
         self.ocr_locked = False
         self._sync_ocr_agent_enabled()
 
     def _on_auto_chk_toggled(self, enabled: bool):
-        self.settings.setValue("ocr/auto", bool(enabled))
+        self.prefs.set_bool("ocr/auto", bool(enabled))
         # 切换自动计时后重新锁定
         self.ocr_locked = False
         self._sync_ocr_agent_enabled()
@@ -978,10 +979,10 @@ class MainWindow(QtWidgets.QMainWindow):
         enabled = bool(value)
         if option == "on_time":
             self.timeline.on_time_enabled = enabled
-            self.settings.setValue("opt/on_time", enabled)
+            self.prefs.set_bool("opt/on_time", enabled)
         else:
             self.timeline.early_enabled = enabled
-            self.settings.setValue("opt/early", enabled)
+            self.prefs.set_bool("opt/early", enabled)
 
     def _sync_ocr_agent_enabled(self):
         # Enabled when: user checked + currently running + ROI valid
