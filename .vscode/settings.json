@@ -1,0 +1,4 @@
+{
+    "//": "Use project-specific environment variables for VS Code Python extension.",
+    "python.envFile": "${workspaceFolder}/.env"
+}
