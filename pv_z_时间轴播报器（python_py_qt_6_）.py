@@ -67,7 +67,6 @@ import io
 import sys
 import threading
 import queue
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -92,6 +91,7 @@ except Exception:
 from PyQt6 import QtCore, QtGui, QtWidgets
 import time
 from opencv_timer_agent import OcrTimerAgent, Roi, parse_roi_string
+from core.domain import TimelineEvent, parse_time_to_ms, format_ms_to_clock
 
 # -----------------------------------------------------------
 # 表头辅助：兼容中文/英文列名
@@ -156,80 +156,6 @@ def _open_csv_stringio_guess(text: str):
         # 默认按逗号
         dialect = _csv.excel
     return _csv, dialect
-
-# ===========================================================
-# 时间解析与格式化工具
-# ===========================================================
-
-def parse_time_to_ms(s: str) -> int:
-    """将字符串时间解析为毫秒。
-
-    支持：
-    - "75" → 75 秒
-    - "1:15" → 1 分 15 秒
-    - "01:15.500" → 1 分 15.5 秒
-
-    参数
-    ----
-    s : str
-        字符串时间。
-
-    返回
-    ----
-    int
-        毫秒数。
-    """
-    s = (s or "").strip()
-    if not s:
-        raise ValueError("空时间字符串")
-
-    if ":" in s:
-        # 形如 mm:ss 或 mm:ss.mmm
-        parts = s.split(":")
-        if len(parts) != 2:
-            raise ValueError(f"时间格式错误：{s}")
-        m = int(parts[0])
-        # 秒支持小数
-        sec = float(parts[1])
-        return int((m * 60 + sec) * 1000)
-
-    # 纯秒，支持小数
-    return int(float(s) * 1000)
-
-
-def format_ms_to_clock(ms: int) -> str:
-    """将毫秒格式化为时钟字符串（m:ss），不显示小数。"""
-    total_sec = int(ms // 1000)
-    m = total_sec // 60
-    s = total_sec % 60
-    return f"{m:d}:{s:02d}"
-
-
-# ===========================================================
-# 数据结构：时间轴事件
-# ===========================================================
-
-@dataclass
-class TimelineEvent:
-    """单条时间轴事件。
-
-    Attributes
-    ----------
-    time_ms : int
-        事件的“正点时间”（毫秒）。
-    action : str
-        事件动作（要播报/显示的文案）。
-    population : Optional[str]
-        该时刻期望的人口（可选）。
-    note : Optional[str]
-        补充备注（可选）。
-    """
-
-    time_ms: int
-    action: str
-    population: Optional[str] = None
-    note: Optional[str] = None
-
 
 # ===========================================================
 # 表格模型：将事件列表绑定到 QTableView
