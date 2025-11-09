@@ -87,6 +87,8 @@ from core.ports import PreferenceStore, TimelineRepository, SpeechPort, TimeSour
 from core.services import TimelineService
 from infra.file_repository import FileTimelineRepository
 from infra.qsettings_store import QtPreferenceStore
+from ui.components import build_left_panel, build_mini_toolbar, build_right_panel
+from ui.state import UiStateController
 
 # ===========================================================
 # 表格模型：将事件列表绑定到 QTableView
@@ -412,140 +414,58 @@ class MainWindow(QtWidgets.QMainWindow):
         self.splitter.setChildrenCollapsible(False)
         layout.addWidget(self.splitter)
 
-        # 左列：大时钟 + 文件/流程列表 + 控制区
-        self.left_panel = QtWidgets.QWidget()
-        left = QtWidgets.QVBoxLayout(self.left_panel)
-        left.setContentsMargins(8, 8, 8, 8)
-        left.setSpacing(6)
+        left_widgets = build_left_panel(self)
+        self.left_panel = left_widgets.widget
+        self.clock_lbl = left_widgets.clock_label
+        self.flow_list = left_widgets.flow_list
+        self.start_btn = left_widgets.start_btn
+        self.pause_btn = left_widgets.pause_btn
+        self.reset_btn = left_widgets.reset_btn
+        self.top_chk = left_widgets.top_checkbox
+        self.auto_chk = left_widgets.auto_checkbox
+        self.roi_edit = left_widgets.roi_edit
+        self.roi_btn = left_widgets.roi_button
+        self.ocr_seen_lbl = left_widgets.ocr_label
+        self.lead_spin = left_widgets.lead_spin
+        self.on_time_chk = left_widgets.on_time_checkbox
+        self.early_chk = left_widgets.early_checkbox
+        self.status_lbl = left_widgets.status_label
         self.splitter.addWidget(self.left_panel)
 
-        clock_font = QtGui.QFont()
-        clock_font.setPointSize(26)
-        clock_font.setBold(True)
-        self.clock_lbl = QtWidgets.QLabel("0:00")
-        self.clock_lbl.setAlignment(
-            QtCore.Qt.AlignmentFlag.AlignLeft | QtCore.Qt.AlignmentFlag.AlignVCenter
-        )
-        self.clock_lbl.setFont(clock_font)
-        left.addWidget(self.clock_lbl)
+        self.lead_spin.setValue(self.timeline.global_lead_ms / 1000.0)
+        self.lead_spin.valueChanged.connect(self._on_lead_changed)
 
-        # 打开文件按钮
-        open_btn = QtWidgets.QPushButton("打开时间轴文件（CSV/TXT/Excel）")
-        open_btn.clicked.connect(self.open_file)
-        left.addWidget(open_btn)
-
-        # 流程列表（支持 Excel 多 Sheet）
-        self.flow_list = QtWidgets.QListWidget()
-        self.flow_list.itemDoubleClicked.connect(self.on_flow_double_clicked)
-        left.addWidget(self.flow_list, 1)
-
-        # 控制按钮：开始/暂停/重置
-        controls = QtWidgets.QHBoxLayout()
-        self.start_btn = QtWidgets.QPushButton("开始")
-        self.start_btn.clicked.connect(self.start)
-        self.pause_btn = QtWidgets.QPushButton("暂停")
-        self.pause_btn.clicked.connect(self.pause)
-        self.reset_btn = QtWidgets.QPushButton("重置")
-        self.reset_btn.clicked.connect(self.reset)
-        controls.addWidget(self.start_btn)
-        controls.addWidget(self.pause_btn)
-        controls.addWidget(self.reset_btn)
-        # 始终置顶开关（与菜单项联动）
-        self.top_chk = QtWidgets.QCheckBox("置顶")
-        self.top_chk.setToolTip("窗口始终置顶（快捷键: T）")
-        self.top_chk.toggled.connect(self._sync_on_top_from_checkbox)
-        controls.addWidget(self.top_chk)
-        left.addLayout(controls)
-        # 同步 OCR 启停（按钮点击后 0ms 调度）
         try:
             self.start_btn.clicked.connect(lambda: QtCore.QTimer.singleShot(0, self._sync_ocr_agent_enabled))
             self.pause_btn.clicked.connect(lambda: QtCore.QTimer.singleShot(0, self._sync_ocr_agent_enabled))
             self.reset_btn.clicked.connect(lambda: QtCore.QTimer.singleShot(0, self._sync_ocr_agent_enabled))
-            # 重置时清空“检测到游戏时间”显示
             self.reset_btn.clicked.connect(lambda: self.ocr_seen_lbl.setText("-"))
         except Exception:
             pass
 
-        # ---- 自动计时（OCR）控件 ----
-        ocr_row1 = QtWidgets.QHBoxLayout()
-        self.auto_chk = QtWidgets.QCheckBox("自动计时")
-        ocr_row1.addWidget(self.auto_chk)
-        ocr_row1.addWidget(QtWidgets.QLabel("检测到游戏时间："))
-        self.ocr_seen_lbl = QtWidgets.QLabel("-")
-        self.ocr_seen_lbl.setMinimumWidth(80)
-        ocr_row1.addWidget(self.ocr_seen_lbl, 1)
-        left.addLayout(ocr_row1)
+        mini_widgets = build_mini_toolbar(self)
+        self.mini_toolbar = mini_widgets.widget
+        self.mini_countdown_lbl = mini_widgets.countdown_label
+        self.mini_restore_btn = mini_widgets.restore_button
+        self.mini_close_btn = mini_widgets.close_button
+        self.mini_size_grip = mini_widgets.size_grip
+        self.mini_restore_btn.clicked.connect(lambda: self.act_mini.setChecked(False))
+        self.mini_close_btn.clicked.connect(self.close)
 
-        ocr_row2 = QtWidgets.QHBoxLayout()
-        self.roi_edit = QtWidgets.QLineEdit()
-        self.roi_edit.setPlaceholderText("x,y,w,h")
-        self.roi_btn = QtWidgets.QPushButton("框选区域")
-        ocr_row2.addWidget(self.roi_edit, 1)
-        ocr_row2.addWidget(self.roi_btn)
-        left.addLayout(ocr_row2)
-
-        # 提前播报秒数（全局，可被每行覆写）
-        lead_layout = QtWidgets.QHBoxLayout()
-        lead_layout.addWidget(QtWidgets.QLabel("提前播报（秒）："))
-        self.lead_spin = QtWidgets.QDoubleSpinBox()
-        self.lead_spin.setRange(0.0, 30.0)
-        self.lead_spin.setDecimals(1)
-        self.lead_spin.setSingleStep(0.5)
-        self.lead_spin.setValue(self.timeline.global_lead_ms / 1000.0)
-        self.lead_spin.valueChanged.connect(self._on_lead_changed)
-        lead_layout.addWidget(self.lead_spin)
-        # 播报选项：整点/提前
-        self.on_time_chk = QtWidgets.QCheckBox("整点播报")
-        self.on_time_chk.setChecked(True)
-        lead_layout.addWidget(self.on_time_chk)
-        self.early_chk = QtWidgets.QCheckBox("提前播报")
-        lead_layout.addWidget(self.early_chk)
-        left.addLayout(lead_layout)
-
-        # 状态文本
-        self.status_lbl = QtWidgets.QLabel("未加载时间轴")
-        left.addWidget(self.status_lbl)
-
-        # 右列：大时钟 + 表格
-        self.right_panel = QtWidgets.QWidget()
-        right = QtWidgets.QVBoxLayout(self.right_panel)
-        right.setContentsMargins(8, 8, 8, 8)
-        right.setSpacing(6)
+        right_widgets = build_right_panel(self, self.mini_toolbar)
+        self.right_panel = right_widgets.widget
+        self.table = right_widgets.table
         self.splitter.addWidget(self.right_panel)
         self.splitter.setStretchFactor(0, 0)
         self.splitter.setStretchFactor(1, 1)
         self._last_splitter_sizes: Optional[List[int]] = None
 
-        # 极简模式工具条（默认隐藏）
-        self.mini_toolbar = QtWidgets.QWidget()
-        mini_layout = QtWidgets.QHBoxLayout(self.mini_toolbar)
-        mini_layout.setContentsMargins(0, 0, 0, 0)
-        mini_layout.setSpacing(4)
-        self.mini_countdown_lbl = QtWidgets.QLabel("--")
-        mini_layout.addWidget(self.mini_countdown_lbl)
-        mini_layout.addStretch()
-        self.mini_restore_btn = QtWidgets.QToolButton()
-        self.mini_restore_btn.setText("恢复")
-        self.mini_restore_btn.setAutoRaise(True)
-        self.mini_restore_btn.clicked.connect(lambda: self.act_mini.setChecked(False))
-        mini_layout.addWidget(self.mini_restore_btn)
-        self.mini_close_btn = QtWidgets.QToolButton()
-        self.mini_close_btn.setText("关闭")
-        self.mini_close_btn.setAutoRaise(True)
-        self.mini_close_btn.clicked.connect(self.close)
-        mini_layout.addWidget(self.mini_close_btn)
-        self.mini_size_grip = QtWidgets.QSizeGrip(self.mini_toolbar)
-        mini_layout.addWidget(self.mini_size_grip, 0, QtCore.Qt.AlignmentFlag.AlignRight | QtCore.Qt.AlignmentFlag.AlignBottom)
-        self.mini_toolbar.hide()
-        right.addWidget(self.mini_toolbar)
-
-        # 事件表格
-        self.table = QtWidgets.QTableView()
-        self.table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectionBehavior.SelectRows)
-        self.table.setEditTriggers(QtWidgets.QAbstractItemView.EditTrigger.NoEditTriggers)
-        self.table.horizontalHeader().setStretchLastSection(True)
-        self.table.verticalHeader().setVisible(False)
-        right.addWidget(self.table, 1)
+        self.ui_state = UiStateController(
+            timeline=self.timeline,
+            status_label=self.status_lbl,
+            clock_label=self.clock_lbl,
+            countdown_label=self.mini_countdown_lbl,
+        )
 
         # 快捷键：空格切换开始/暂停，R 重置，O 打开文件，T 置顶
         QtGui.QShortcut(QtGui.QKeySequence("Space"), self, activated=self._toggle_run)
@@ -620,7 +540,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.flow_list.addItem(name)
 
         if not flows:
-            self.status_lbl.setText("未在文件中找到有效时间轴")
+            self.ui_state.set_status("未在文件中找到有效时间轴")
             return
 
         # 自动选择第一个流程
@@ -629,7 +549,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.flow_list.setCurrentItem(first_item)
             self._set_active_flow(first_item.text())
 
-        self.status_lbl.setText(f"已加载：{path.name}（{len(flows)} 个流程）")
+        self.ui_state.set_status(f"已加载：{path.name}（{len(flows)} 个流程）")
 
     # ---------- 切换流程/双击开始 ----------
     def _set_active_flow(self, name: str):
@@ -678,7 +598,7 @@ class MainWindow(QtWidgets.QMainWindow):
             QtWidgets.QMessageBox.information(self, "提示", str(exc))
             return
         self.timer.start()
-        self.status_lbl.setText(f"运行中：{self.timeline.current_flow_name or '--'}")
+        self.ui_state.set_status(f"运行中：{self.timeline.current_flow_name or '--'}")
         self._last_tick = time.perf_counter()
         self.ocr_locked = False
         self._sync_ocr_agent_enabled()
@@ -689,7 +609,7 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         self.timeline.pause()
         self.timer.stop()
-        self.status_lbl.setText("已暂停")
+        self.ui_state.set_status("已暂停")
         self._last_tick = 0.0
         self.ocr_locked = False
         self._sync_ocr_agent_enabled()
@@ -706,7 +626,7 @@ class MainWindow(QtWidgets.QMainWindow):
         except Exception:
             pass
         self._update_clock()
-        self.status_lbl.setText("已重置")
+        self.ui_state.set_status("已重置")
         self._sync_ocr_agent_enabled()
 
     # ---------- 计时心跳 ----------
@@ -755,39 +675,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _update_clock(self):
         """刷新大时钟，并滚动表格定位到“下一条未播事件”。"""
-        elapsed = self.timeline.elapsed_ms
-        clock_text = format_ms_to_clock(elapsed)
-        self.clock_lbl.setText(clock_text)
-
-        # 高亮下一条（time_ms >= 当前时间）的事件
-        if self.model:
-            idx = self._next_event_row_simple()
-            if idx is not None and idx >= 0:
-                self.table.selectRow(idx)
-                hint = (
-                    QtWidgets.QAbstractItemView.ScrollHint.PositionAtTop
-                    if self.act_mini.isChecked()
-                    else QtWidgets.QAbstractItemView.ScrollHint.PositionAtCenter
-                )
-                self.table.scrollTo(self.model.index(idx, 0), hint)
-                next_ev = self.model.events[idx]
-                diff_ms = max(0, next_ev.time_ms - elapsed)
-                self.mini_countdown_lbl.setText(format_ms_to_clock(diff_ms))
-            else:
-                self.mini_countdown_lbl.setText("--")
-        else:
-            self.mini_countdown_lbl.setText("--")
-
-    # ---------- 基于跨界的简化播报判定（不维护逐条状态） ----------
-    def _next_event_row_simple(self) -> Optional[int]:
-        """返回第一条 time_ms >= 当前 elapsed_ms 的行号（用于高亮）。"""
-        if not self.model:
-            return None
-        elapsed = self.timeline.elapsed_ms
-        for i, ev in enumerate(self.model.events):
-            if ev.time_ms >= elapsed:
-                return i
-        return len(self.model.events) - 1 if self.model.events else None
+        self.ui_state.update_clock(self.model, self.table, self.act_mini.isChecked())
 
     # ---------- 播报封装 ----------
     def _speak(self, text: str):
