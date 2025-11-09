@@ -83,7 +83,7 @@ from PyQt6 import QtCore, QtGui, QtWidgets
 import time
 from opencv_timer_agent import OcrTimerAgent, Roi, parse_roi_string
 from core.domain import TimelineEvent, parse_time_to_ms, format_ms_to_clock
-from core.ports import PreferenceStore, TimelineRepository
+from core.ports import PreferenceStore, TimelineRepository, SpeechPort, TimeSourcePort
 from core.services import TimelineService
 from infra.file_repository import FileTimelineRepository
 from infra.qsettings_store import QtPreferenceStore
@@ -346,6 +346,8 @@ class MainWindow(QtWidgets.QMainWindow):
         timeline: Optional[TimelineService] = None,
         repository: Optional[TimelineRepository] = None,
         preference_store: Optional[PreferenceStore] = None,
+        speech_port: Optional[SpeechPort] = None,
+        time_source: Optional[TimeSourcePort] = None,
     ):
         super().__init__()
         self.setWindowTitle("时间轴播报器（PvZ 战术计时）")
@@ -363,9 +365,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self.timer.setInterval(100)
         self.timer.timeout.connect(self._on_tick)
 
-        # 语音线程
-        self.tts = TTSWorker(self)
-        self.tts.start()
+        # 语音线程/端口
+        self._owns_speech = speech_port is None
+        self.tts: SpeechPort = speech_port or TTSWorker(self)
+        if self._owns_speech and isinstance(self.tts, TTSWorker):
+            self.tts.start()
 
         # 构建 UI
         self._build_ui()
@@ -580,10 +584,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self.act_top.toggled.connect(self.top_chk.setChecked)
         view_menu.addAction(self.act_top)
         # 初始化 OCR 自动计时模块（UI 已构建完成）
+        self.ocr_agent: Optional[TimeSourcePort] = None
         try:
-            self._init_ocr_agent()
+            self._init_ocr_agent(time_source)
         except Exception:
-            pass
+            self.ocr_agent = None
 
         QtCore.QTimer.singleShot(
             0, lambda: self.splitter.setSizes([320, max(360, self.width() - 320)])
@@ -729,7 +734,8 @@ class MainWindow(QtWidgets.QMainWindow):
             auto_enabled = False
         if not auto_enabled:
             return False
-        ocr_enabled = hasattr(self, 'ocr_agent') and self.ocr_agent.is_enabled()
+        ocr_agent = getattr(self, 'ocr_agent', None)
+        ocr_enabled = bool(ocr_agent and ocr_agent.is_enabled())
         ocr_locked = bool(getattr(self, 'ocr_locked', False))
         if (not ocr_enabled) or (not ocr_locked):
             try:
@@ -900,8 +906,13 @@ class MainWindow(QtWidgets.QMainWindow):
         return super().eventFilter(obj, event)
 
     # ---------- OCR 自动计时（初始化与桥接） ----------
-    def _init_ocr_agent(self):
-        self.ocr_agent = OcrTimerAgent(self, interval_ms=200, scale=3, score_thresh=0.55)
+    def _init_ocr_agent(self, time_source: Optional[TimeSourcePort]):
+        self.ocr_agent: TimeSourcePort = time_source or OcrTimerAgent(
+            self,
+            interval_ms=200,
+            scale=3,
+            score_thresh=0.55,
+        )
         # 初始未锁定识别
         self.ocr_locked = False
 
@@ -953,6 +964,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self._sync_ocr_agent_enabled()
 
     def _on_roi_edit_changed(self):
+        if not getattr(self, 'ocr_agent', None):
+            return
         text = self.roi_edit.text().strip()
         ok = self.ocr_agent.set_roi_from_string(text)
         if ok:
@@ -962,6 +975,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self._sync_ocr_agent_enabled()
 
     def _on_roi_selected(self, x: int, y: int, w: int, h: int):
+        if not getattr(self, 'ocr_agent', None):
+            return
         s = f"{x},{y},{w},{h}"
         self.roi_edit.setText(s)
         self.prefs.set_str("ocr/roi", s)
@@ -986,9 +1001,11 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _sync_ocr_agent_enabled(self):
         # Enabled when: user checked + currently running + ROI valid
+        if not getattr(self, 'ocr_agent', None):
+            return
         want = False
         try:
-            roi = self.ocr_agent.get_roi()
+            roi = self.ocr_agent.get_roi()  # type: ignore[union-attr]
             want = bool(
                 self.auto_chk.isChecked()
                 and self.timeline.running
@@ -997,9 +1014,14 @@ class MainWindow(QtWidgets.QMainWindow):
             )
         except Exception:
             want = False
-        self.ocr_agent.set_enabled(want)
+        try:
+            self.ocr_agent.set_enabled(want)  # type: ignore[union-attr]
+        except Exception:
+            pass
 
     def _on_ocr_time_detected(self, time_text: str, ms: int):
+        if not getattr(self, 'ocr_agent', None):
+            return
         # Update label always
         try:
             self.ocr_seen_lbl.setText(time_text)
