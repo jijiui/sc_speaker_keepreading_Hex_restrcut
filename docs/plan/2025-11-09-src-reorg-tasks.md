@@ -38,7 +38,7 @@
 | 序号 | 任务 | 负责人 | 状态 |
 | --- | --- | --- | --- |
 | 1 | 建立 `src/` 并迁移 `core/`、`infra/`、`ui/`、主程序、OCR 相关文件 | _TODO_ | ☐ |
-| 2 | 更新所有导入路径，确保 `app`、`core`、`infra`、`ui` 之间使用新包结构 | _TODO_ | ☐ |
+| 2 | 更新所有导入路径，统一用 `app.<module>` 形式（通过 `PYTHONPATH=src` 或等价配置暴露包根） | _TODO_ | ☐ |
 | 3 | 调整 `scripts/manual_regression_stage0.py`、`scripts/smoke_timeline.py`、测试文件的导入 | _TODO_ | ☐ |
 | 4 | `.venv` 中重跑单元测试与冒烟脚本，记录结果 | _TODO_ | ☐ |
 | 5 | 更新 `docs/重构任务日志.md`，记录 `src/` 迁移完成的 UTC 时间戳 | _TODO_ | ☐ |
