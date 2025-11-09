@@ -92,6 +92,7 @@ from PyQt6 import QtCore, QtGui, QtWidgets
 import time
 from opencv_timer_agent import OcrTimerAgent, Roi, parse_roi_string
 from core.domain import TimelineEvent, parse_time_to_ms, format_ms_to_clock
+from core.services import TimelineService
 
 # -----------------------------------------------------------
 # 表头辅助：兼容中文/英文列名
@@ -416,20 +417,14 @@ class MainWindow(QtWidgets.QMainWindow):
         self.resize(1000, 620)
 
         # ---- 运行时状态 ----
-        self.flows: Dict[str, List[TimelineEvent]] = {}  # 流程名 → 事件列表
-        self.current_flow_name: Optional[str] = None     # 当前激活流程名
-        self.model: Optional[TimelineModel] = None       # 表格模型
-        self.elapsed_ms: int = 0                         # 已用时间（毫秒）
-        self.prev_ms: int = 0                            # 上一次采样时间（毫秒）
-        self.running: bool = False                       # 运行状态\n        self._last_tick: float = 0.0                     # 上一次 tick 的单调时钟
+        self.timeline = TimelineService(global_lead_ms=2000)
+        self.model: Optional[TimelineModel] = None
+        self._last_tick: float = 0.0
 
         # 100ms 刷新时钟与播报判定
         self.timer = QtCore.QTimer(self)
         self.timer.setInterval(100)
         self.timer.timeout.connect(self._on_tick)
-
-        # 全局“提前播报秒数”（当前版本仅支持统一提前量）
-        self.global_lead_ms = 2000  # 默认 2 秒
 
         # 语音线程
         self.tts = TTSWorker(self)
@@ -555,7 +550,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.lead_spin.setRange(0.0, 30.0)
         self.lead_spin.setDecimals(1)
         self.lead_spin.setSingleStep(0.5)
-        self.lead_spin.setValue(self.global_lead_ms / 1000.0)
+        self.lead_spin.setValue(self.timeline.global_lead_ms / 1000.0)
         self.lead_spin.valueChanged.connect(self._on_lead_changed)
         lead_layout.addWidget(self.lead_spin)
         # 播报选项：整点/提前
@@ -677,7 +672,7 @@ class MainWindow(QtWidgets.QMainWindow):
             QtWidgets.QMessageBox.critical(self, "读取失败", f"无法读取文件：\n{e}")
             return
 
-        self.flows = flows
+        self.timeline.set_flows(flows)
         self.flow_list.clear()
         for name in flows.keys():
             self.flow_list.addItem(name)
@@ -828,8 +823,8 @@ class MainWindow(QtWidgets.QMainWindow):
     # ---------- 切换流程/双击开始 ----------
     def _set_active_flow(self, name: str):
         """根据流程名切换当前事件表，并自动重置计时。"""
-        evs = self.flows.get(name, [])
-        self.model = TimelineModel(evs, parent=self)
+        events = self.timeline.set_current_flow(name)
+        self.model = TimelineModel(events, parent=self)
         self.table.setModel(self.model)
         if "population" in self.model._columns:
             col_idx = self.model._columns.index("population")
@@ -843,7 +838,6 @@ class MainWindow(QtWidgets.QMainWindow):
         if "note" in self.model._columns:
             col_idx = self.model._columns.index("note")
             self.table.setColumnWidth(col_idx, 420)
-        self.current_flow_name = name
         self.reset()  # 加载新流程后，自动重置为 0:00
 
     def on_flow_double_clicked(self, item: QtWidgets.QListWidgetItem):
@@ -853,11 +847,11 @@ class MainWindow(QtWidgets.QMainWindow):
     # ---------- 控制区：开始/暂停/重置 ----------
     def _on_lead_changed(self, val: float):
         """全局提前播报秒数变化（单位：秒 → 保存为毫秒）。"""
-        self.global_lead_ms = int(val * 1000)
+        self.timeline.set_global_lead(int(val * 1000))
 
     def _toggle_run(self):
         """空格：开始 ↔ 暂停。"""
-        if self.running:
+        if self.timeline.running:
             self.pause()
         else:
             self.start()
@@ -867,36 +861,34 @@ class MainWindow(QtWidgets.QMainWindow):
         if not self.model:
             QtWidgets.QMessageBox.information(self, "提示", "请先加载一个时间轴流程。")
             return
-        self.running = True
+        try:
+            self.timeline.start()
+        except RuntimeError as exc:
+            QtWidgets.QMessageBox.information(self, "提示", str(exc))
+            return
         self.timer.start()
-        self.status_lbl.setText(f"运行中：{self.current_flow_name}")
-        # 对齐 prev_ms，避免瞬时跨界，并记录墙钟起点
-        self.prev_ms = self.elapsed_ms
+        self.status_lbl.setText(f"运行中：{self.timeline.current_flow_name or '--'}")
         self._last_tick = time.perf_counter()
-
-        # OCR 自动计时：启动时视为未锁定，等待首次识别
         self.ocr_locked = False
+        self._sync_ocr_agent_enabled()
 
     def pause(self):
         """暂停计时。"""
-        self.running = False
+        if not self.timeline.running:
+            return
+        self.timeline.pause()
         self.timer.stop()
         self.status_lbl.setText("已暂停")
-        # 对齐 prev_ms，避免恢复时误触发，并清空墙钟起点
-        self.prev_ms = self.elapsed_ms
         self._last_tick = 0.0
-
-        # OCR 自动计时：暂停后清除锁定
         self.ocr_locked = False
+        self._sync_ocr_agent_enabled()
 
     def reset(self):
         """重置计时并清空播报队列。"""
-        self.running = False
+        self.timeline.reset()
         self.timer.stop()
-        self.elapsed_ms = 0
-        self.prev_ms = 0
         self._last_tick = 0.0
-        # 清空 TTS 待播队列，避免上一轮残留
+        self.ocr_locked = False
         try:
             if hasattr(self, 'tts') and self.tts:
                 self.tts.clear_queue()
@@ -904,43 +896,55 @@ class MainWindow(QtWidgets.QMainWindow):
             pass
         self._update_clock()
         self.status_lbl.setText("已重置")
+        self._sync_ocr_agent_enabled()
 
     # ---------- 计时心跳 ----------
     def _on_tick(self):
         """每 100ms 调用：推进时间、更新显示、处理播报。"""
-        if not self.running or not self.model:
+        if not self.timeline.running or not self.model:
             return
-        # 自动计时优先：无识别→不计时；有识别→不自增，仅刷新/判定
-        try:
-            if hasattr(self, 'auto_chk') and self.auto_chk.isChecked():
-                ocr_enabled = hasattr(self, 'ocr_agent') and self.ocr_agent.is_enabled()
-                ocr_locked = bool(getattr(self, 'ocr_locked', False))
-                if (not ocr_enabled) or (not ocr_locked):
-                    try:
-                        self.clock_lbl.setText("没检测到")
-                    except Exception:
-                        pass
-                    return
-                self._update_clock()
-                self._check_announcements_simple()
-                return
-        except Exception:
-            pass
-        # 真实时间推进：使用单调时钟差值，避免 QTimer 抖动变慢
+        if self._handle_auto_mode():
+            return
         now = time.perf_counter()
         if not hasattr(self, '_last_tick') or not self._last_tick:
             self._last_tick = now
+            return
         delta_ms = max(0, int((now - self._last_tick) * 1000))
         self._last_tick = now
-        self.elapsed_ms += delta_ms
+        decision = self.timeline.advance(delta_ms)
         self._update_clock()
-        self._check_announcements_simple()
-        # 更新 prev_ms（基于手动推进）
-        self.prev_ms = self.elapsed_ms
+        self._handle_decision(decision)
+
+    def _handle_auto_mode(self) -> bool:
+        """Auto OCR mode hijacks ticks; return True when manual advance should skip."""
+        try:
+            auto_enabled = hasattr(self, 'auto_chk') and self.auto_chk.isChecked()
+        except Exception:
+            auto_enabled = False
+        if not auto_enabled:
+            return False
+        ocr_enabled = hasattr(self, 'ocr_agent') and self.ocr_agent.is_enabled()
+        ocr_locked = bool(getattr(self, 'ocr_locked', False))
+        if (not ocr_enabled) or (not ocr_locked):
+            try:
+                self.clock_lbl.setText("没检测到")
+            except Exception:
+                pass
+            self._last_tick = time.perf_counter()
+            return True
+        self._update_clock()
+        self._last_tick = time.perf_counter()
+        return True
+
+    def _handle_decision(self, decision):
+        if not decision:
+            return
+        self._speak(decision.event.action)
 
     def _update_clock(self):
         """刷新大时钟，并滚动表格定位到“下一条未播事件”。"""
-        clock_text = format_ms_to_clock(self.elapsed_ms)
+        elapsed = self.timeline.elapsed_ms
+        clock_text = format_ms_to_clock(elapsed)
         self.clock_lbl.setText(clock_text)
 
         # 高亮下一条（time_ms >= 当前时间）的事件
@@ -955,7 +959,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 )
                 self.table.scrollTo(self.model.index(idx, 0), hint)
                 next_ev = self.model.events[idx]
-                diff_ms = max(0, next_ev.time_ms - self.elapsed_ms)
+                diff_ms = max(0, next_ev.time_ms - elapsed)
                 self.mini_countdown_lbl.setText(format_ms_to_clock(diff_ms))
             else:
                 self.mini_countdown_lbl.setText("--")
@@ -967,45 +971,11 @@ class MainWindow(QtWidgets.QMainWindow):
         """返回第一条 time_ms >= 当前 elapsed_ms 的行号（用于高亮）。"""
         if not self.model:
             return None
+        elapsed = self.timeline.elapsed_ms
         for i, ev in enumerate(self.model.events):
-            if ev.time_ms >= self.elapsed_ms:
+            if ev.time_ms >= elapsed:
                 return i
         return len(self.model.events) - 1 if self.model.events else None
-
-    def _check_announcements_simple(self):
-        """只关注下一条事件，依据 prev_ms→elapsed_ms 的跨界判断是否播报一次。
-
-        - 正点：prev_ms < time_ms <= elapsed_ms → 播一次 action
-        - 提前：prev_ms < (time_ms - advance_ms) <= elapsed_ms 且 elapsed_ms < time_ms → 播一次 action（advance_ms 源于全局提前秒）
-        - 每个 tick 最多播一条；不维护每条事件的“已播报/提前”状态
-        """
-        if not self.model or not self.model.events:
-            return
-        ps = getattr(self, 'prev_ms', 0)
-        cs = self.elapsed_ms
-        if cs <= ps:
-            return
-        for ev in self.model.events:
-            # 选项：整点/提前
-            try:
-                on_time_enabled = self.on_time_chk.isChecked()
-            except Exception:
-                on_time_enabled = True
-            try:
-                early_enabled = self.early_chk.isChecked()
-            except Exception:
-                early_enabled = False
-            # 提前毫秒：当“提前播报”开启时，统一使用全局提前秒
-            advance_ms = self.global_lead_ms if early_enabled else 0
-            early_start = max(0, ev.time_ms - advance_ms)
-            # 正点跨界优先（需开启整点播报）
-            if on_time_enabled and (ps < ev.time_ms <= cs):
-                self._speak(ev.action)
-                break
-            # 提前跨界（需开启提前播报；不说“即将”）
-            if (advance_ms > 0) and (ps < early_start <= cs) and (cs < ev.time_ms):
-                self._speak(ev.action)
-                break
 
     # ---------- 播报封装 ----------
     def _speak(self, text: str):
@@ -1159,6 +1129,8 @@ class MainWindow(QtWidgets.QMainWindow):
             self.early_chk.setChecked(early_on)
         except Exception:
             pass
+        self.timeline.on_time_enabled = bool(on_time_on)
+        self.timeline.early_enabled = bool(early_on)
 
         # Wire signals
         self.roi_btn.clicked.connect(lambda: self.ocr_agent.select_roi(self))
@@ -1168,8 +1140,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.ocr_agent.timeDetected.connect(self._on_ocr_time_detected)
         # Save broadcast options
         try:
-            self.on_time_chk.toggled.connect(lambda v: self.settings.setValue("opt/on_time", bool(v)))
-            self.early_chk.toggled.connect(lambda v: self.settings.setValue("opt/early", bool(v)))
+            self.on_time_chk.toggled.connect(lambda v: self._on_broadcast_option_toggled("on_time", v))
+            self.early_chk.toggled.connect(lambda v: self._on_broadcast_option_toggled("early", v))
         except Exception:
             pass
 
@@ -1199,12 +1171,26 @@ class MainWindow(QtWidgets.QMainWindow):
         self.ocr_locked = False
         self._sync_ocr_agent_enabled()
 
+    def _on_broadcast_option_toggled(self, option: str, value: bool):
+        enabled = bool(value)
+        if option == "on_time":
+            self.timeline.on_time_enabled = enabled
+            self.settings.setValue("opt/on_time", enabled)
+        else:
+            self.timeline.early_enabled = enabled
+            self.settings.setValue("opt/early", enabled)
+
     def _sync_ocr_agent_enabled(self):
         # Enabled when: user checked + currently running + ROI valid
         want = False
         try:
             roi = self.ocr_agent.get_roi()
-            want = bool(self.auto_chk.isChecked() and self.running and roi is not None and roi.is_valid())
+            want = bool(
+                self.auto_chk.isChecked()
+                and self.timeline.running
+                and roi is not None
+                and roi.is_valid()
+            )
         except Exception:
             want = False
         self.ocr_agent.set_enabled(want)
@@ -1216,22 +1202,21 @@ class MainWindow(QtWidgets.QMainWindow):
         except Exception:
             pass
         # Only drive announcements when running
-        if not self.running:
+        if not self.timeline.running:
             return
         # 锁定：后续 tick 由 OCR 驱动
         # 首次锁定：对齐 prev_ms，避免锚定瞬间触发提前播报
         if not getattr(self, 'ocr_locked', False):
             self.ocr_locked = True
-            self.elapsed_ms = ms
-            self.prev_ms = ms
+            self.timeline.prime_elapsed(ms)
             self._update_clock()
+            self._last_tick = time.perf_counter()
             return
         self.ocr_locked = True
-        self.elapsed_ms = ms
+        decision = self.timeline.sync_elapsed(ms)
         self._update_clock()
-        self._check_announcements_simple()
-        # OCR 推进后对齐 prev_ms
-        self.prev_ms = self.elapsed_ms
+        self._handle_decision(decision)
+        self._last_tick = time.perf_counter()
 
     def export_sample_csv(self):
         """导出一份示例时间轴 CSV（含 PvZ 方案B 的节点）。"""

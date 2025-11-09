@@ -122,6 +122,11 @@ class TimelineService:
         self._prev_ms = self._elapsed_ms
         return decision
 
+    def prime_elapsed(self, target_ms: int) -> None:
+        """Align elapsed/prev without触发播报（第一次锁定 OCR 时使用）。"""
+        self._elapsed_ms = max(0, int(target_ms))
+        self._prev_ms = self._elapsed_ms
+
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
