@@ -1,0 +1,13 @@
+# Core runtime（需先激活仓库上级的 .venv，再安装）
+PyQt6==6.10.0
+PyQt6-Qt6==6.10.0
+PyQt6-sip==13.10.2
+numpy==2.0.2
+opencv-python==4.12.0.88
+opencv-python-headless==4.12.0.88  # 非 GUI 环境可只安装该版本
+pandas==2.3.3
+openpyxl==3.1.5  # Excel 导入可选，缺失时仅支持 CSV/TXT
+
+# Speech (可选)
+pyttsx3==2.99  # 缺失时 TTSWorker 自动降级为蜂鸣/打印
+pywin32==311    # Windows SAPI 支持
