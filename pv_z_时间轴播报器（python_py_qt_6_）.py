@@ -1089,7 +1089,14 @@ class MainWindow(QtWidgets.QMainWindow):
 
 def main():
     app = QtWidgets.QApplication(sys.argv)
-    win = MainWindow()
+    timeline = TimelineService(global_lead_ms=2000)
+    repository = FileTimelineRepository()
+    prefs = QtPreferenceStore()
+    win = MainWindow(
+        timeline=timeline,
+        repository=repository,
+        preference_store=prefs,
+    )
     win.show()
     sys.exit(app.exec())
 
