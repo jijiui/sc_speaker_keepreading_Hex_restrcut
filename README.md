@@ -72,3 +72,9 @@ CI (`.github/workflows/ci.yml`) runs the same suite on Windows: install deps →
 Need orientation? Start by reading:
 - `docs/plan/2025-11-09-main-ui/{instruction,plan,tasks}.md`
 - `docs/plan/2025-11-09-src-reorg/{instruction,plan,tasks}.md`
+
+## Agent Timeline
+
+| Agent (Name & Period) | Summary |
+| --- | --- |
+| Alex (2025-11-09) | Migrated codebase to `src/app` layout, added repository tests + CI workflow, updated README/run scripts, documented Stage 0 reruns, and published refactor instruction/plan/tasks for upcoming Main UI split. |
