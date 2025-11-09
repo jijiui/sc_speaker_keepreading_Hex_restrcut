@@ -1,7 +1,18 @@
-import unittest
+"""Unit tests for TimelineService using the src/ layout."""
 
-from core.domain import TimelineEvent
-from core.services.timeline_service import TimelineService
+from __future__ import annotations
+
+import sys
+import unittest
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+SRC_DIR = ROOT / "src"
+if str(SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(SRC_DIR))
+
+from app.core.domain import TimelineEvent
+from app.core.services.timeline_service import TimelineService
 
 
 class TimelineServiceTest(unittest.TestCase):

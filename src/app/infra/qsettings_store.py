@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from PyQt6 import QtCore
 
-from core.ports import PreferenceStore
+from app.core.ports import PreferenceStore
 
 __all__ = ["QtPreferenceStore"]
 

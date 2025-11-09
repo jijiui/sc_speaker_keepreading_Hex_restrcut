@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Dict, List, Literal, Optional, Sequence
 
-from core.domain import TimelineEvent
+from app.core.domain import TimelineEvent
 
 AnnouncementKind = Literal["on_time", "early"]
 

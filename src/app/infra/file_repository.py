@@ -5,8 +5,8 @@ import io
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from core.domain import TimelineEvent, parse_time_to_ms
-from core.ports import TimelineRepository
+from app.core.domain import TimelineEvent, parse_time_to_ms
+from app.core.ports import TimelineRepository
 
 try:
     import pandas as pd  # type: ignore

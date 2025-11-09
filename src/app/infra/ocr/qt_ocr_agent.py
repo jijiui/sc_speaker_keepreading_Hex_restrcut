@@ -15,7 +15,7 @@ except Exception:  # pragma: no cover
     cv2 = None  # type: ignore
     _HAS_CV = False
 
-from opencv_timer_core import DigitLibrary, preprocess, qimage_to_bgr, segment_chars
+from app.infra.ocr.opencv_core import DigitLibrary, preprocess, qimage_to_bgr, segment_chars
 
 
 @dataclass

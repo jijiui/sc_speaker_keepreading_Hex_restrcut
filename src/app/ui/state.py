@@ -6,8 +6,8 @@ from typing import Optional, TYPE_CHECKING
 
 from PyQt6 import QtWidgets
 
-from core.domain import format_ms_to_clock
-from core.services import TimelineService
+from app.core.domain import format_ms_to_clock
+from app.core.services import TimelineService
 
 if TYPE_CHECKING:  # pragma: no cover
     from typing import Any as TimelineModel

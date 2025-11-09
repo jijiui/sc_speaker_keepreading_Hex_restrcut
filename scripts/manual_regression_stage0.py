@@ -14,20 +14,19 @@ import tempfile
 import textwrap
 import time
 from dataclasses import dataclass
-from importlib.machinery import SourceFileLoader
+import sys
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
 from PyQt6 import QtCore, QtWidgets
 
 ROOT = Path(__file__).resolve().parents[1]
-APP_PATH = ROOT / "pv_z_时间轴播报器（python_py_qt_6_）.py"
-OCR_AGENT_PATH = ROOT / "opencv_timer_agent.py"
+SRC_DIR = ROOT / "src"
+if str(SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(SRC_DIR))
 
-import sys
-
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
+from app.main import MainWindow  # type: ignore  # noqa: E402
+from app.infra.ocr import qt_ocr_agent as ocr_agent_mod  # type: ignore  # noqa: E402
 
 
 @dataclass
@@ -38,10 +37,6 @@ class UCResult:
 
     def to_dict(self) -> Dict[str, str]:
         return {"uc": self.uc, "status": self.status, "detail": self.detail}
-
-
-def _load_app_module():
-    return SourceFileLoader("pvz_app_reg", str(APP_PATH)).load_module()
 
 
 def _ensure_app() -> QtWidgets.QApplication:
@@ -95,10 +90,9 @@ def _run_uc03(window, events: List[Any]) -> UCResult:
 
 
 def _run_uc04() -> UCResult:
-    agent_mod = SourceFileLoader("ocr_agent_reg", str(OCR_AGENT_PATH)).load_module()
-    has_cv = getattr(agent_mod, "_HAS_CV", False)
-    agent = agent_mod.OcrTimerAgent()
-    roi = agent_mod.Roi(0, 0, 120, 50)
+    has_cv = getattr(ocr_agent_mod, "_HAS_CV", False)
+    agent = ocr_agent_mod.OcrTimerAgent()
+    roi = ocr_agent_mod.Roi(0, 0, 120, 50)
     agent.set_roi(roi)
     agent.set_enabled(True)
     if has_cv and agent.is_enabled():
@@ -197,8 +191,7 @@ def _prepare_xlsx(path: Path) -> None:
 
 def main() -> None:
     app = _ensure_app()
-    mod = _load_app_module()
-    window = mod.MainWindow()
+    window = MainWindow()
     window.hide()
     results: List[UCResult] = []
     tmp_dir = Path(tempfile.mkdtemp(prefix="pvz_stage0_"))

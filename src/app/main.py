@@ -31,7 +31,7 @@ PvZ 时间轴播报器（桌面端 / Python + PyQt6）
 
 运行
 ----
-    python "pv_z_时间轴播报器（python_py_qt_6_）.py"
+    python -m app.main
 
 文件格式
 --------
@@ -81,14 +81,14 @@ except Exception:  # 未安装或初始化失败
 # PyQt6 为必需依赖，如缺失应直接报错提示安装
 from PyQt6 import QtCore, QtGui, QtWidgets
 import time
-from opencv_timer_agent import OcrTimerAgent, Roi, parse_roi_string
-from core.domain import TimelineEvent, parse_time_to_ms, format_ms_to_clock
-from core.ports import PreferenceStore, TimelineRepository, SpeechPort, TimeSourcePort
-from core.services import TimelineService
-from infra.file_repository import FileTimelineRepository
-from infra.qsettings_store import QtPreferenceStore
-from ui.components import build_left_panel, build_mini_toolbar, build_right_panel
-from ui.state import UiStateController
+from app.infra.ocr.qt_ocr_agent import OcrTimerAgent, Roi, parse_roi_string
+from app.core.domain import TimelineEvent, parse_time_to_ms, format_ms_to_clock
+from app.core.ports import PreferenceStore, TimelineRepository, SpeechPort, TimeSourcePort
+from app.core.services import TimelineService
+from app.infra.file_repository import FileTimelineRepository
+from app.infra.qsettings_store import QtPreferenceStore
+from app.ui.components import build_left_panel, build_mini_toolbar, build_right_panel
+from app.ui.state import UiStateController
 
 # ===========================================================
 # 表格模型：将事件列表绑定到 QTableView

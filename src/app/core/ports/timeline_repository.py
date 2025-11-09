@@ -4,7 +4,7 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Dict, List
 
-from core.domain import TimelineEvent
+from app.core.domain import TimelineEvent
 
 
 class TimelineRepository(ABC):
