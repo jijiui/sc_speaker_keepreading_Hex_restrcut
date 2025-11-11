@@ -29,6 +29,24 @@ from app.main import MainWindow  # type: ignore  # noqa: E402
 from app.infra.ocr import qt_ocr_agent as ocr_agent_mod  # type: ignore  # noqa: E402
 
 
+def _suppress_dialogs() -> None:
+    """Prevent modal dialogs from blocking automation."""
+
+    def _return_ok(*_args, **_kwargs):
+        return QtWidgets.QMessageBox.StandardButton.Ok
+
+    def _fake_file_dialog(*_args, **_kwargs):
+        return ("", "")
+
+    QtWidgets.QMessageBox.information = staticmethod(_return_ok)  # type: ignore[attr-defined]
+    QtWidgets.QMessageBox.warning = staticmethod(_return_ok)  # type: ignore[attr-defined]
+    QtWidgets.QMessageBox.critical = staticmethod(_return_ok)  # type: ignore[attr-defined]
+    QtWidgets.QMessageBox.question = staticmethod(_return_ok)  # type: ignore[attr-defined]
+
+    QtWidgets.QFileDialog.getOpenFileName = staticmethod(_fake_file_dialog)  # type: ignore[attr-defined]
+    QtWidgets.QFileDialog.getSaveFileName = staticmethod(_fake_file_dialog)  # type: ignore[attr-defined]
+
+
 @dataclass
 class UCResult:
     uc: str
@@ -190,6 +208,7 @@ def _prepare_xlsx(path: Path) -> None:
 
 
 def main() -> None:
+    _suppress_dialogs()
     app = _ensure_app()
     window = MainWindow()
     window.hide()
