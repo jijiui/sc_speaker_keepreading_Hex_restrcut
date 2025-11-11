@@ -15,6 +15,7 @@ if TYPE_CHECKING:  # pragma: no cover
 class LeftPanelWidgets:
     widget: QtWidgets.QWidget
     clock_label: QtWidgets.QLabel
+    open_button: QtWidgets.QPushButton
     flow_list: QtWidgets.QListWidget
     start_btn: QtWidgets.QPushButton
     pause_btn: QtWidgets.QPushButton
@@ -45,8 +46,8 @@ class RightPanelWidgets:
     table: QtWidgets.QTableView
 
 
-def build_left_panel(main: "MainWindow") -> LeftPanelWidgets:
-    panel = QtWidgets.QWidget(main)
+def build_left_panel(parent: QtWidgets.QWidget | None = None) -> LeftPanelWidgets:
+    panel = QtWidgets.QWidget(parent)
     layout = QtWidgets.QVBoxLayout(panel)
     layout.setContentsMargins(8, 8, 8, 8)
     layout.setSpacing(6)
@@ -60,25 +61,19 @@ def build_left_panel(main: "MainWindow") -> LeftPanelWidgets:
     layout.addWidget(clock_label)
 
     open_btn = QtWidgets.QPushButton("打开时间轴文件（CSV/TXT/Excel）")
-    open_btn.clicked.connect(main.open_file)  # type: ignore[arg-type]
     layout.addWidget(open_btn)
 
     flow_list = QtWidgets.QListWidget()
-    flow_list.itemDoubleClicked.connect(main.on_flow_double_clicked)  # type: ignore[arg-type]
     layout.addWidget(flow_list, 1)
 
     controls = QtWidgets.QHBoxLayout()
     start_btn = QtWidgets.QPushButton("开始")
-    start_btn.clicked.connect(main.start)  # type: ignore[arg-type]
     pause_btn = QtWidgets.QPushButton("暂停")
-    pause_btn.clicked.connect(main.pause)  # type: ignore[arg-type]
     reset_btn = QtWidgets.QPushButton("重置")
-    reset_btn.clicked.connect(main.reset)  # type: ignore[arg-type]
     for btn in (start_btn, pause_btn, reset_btn):
         controls.addWidget(btn)
     top_checkbox = QtWidgets.QCheckBox("置顶")
     top_checkbox.setToolTip("窗口始终置顶（快捷键: T）")
-    top_checkbox.toggled.connect(main._sync_on_top_from_checkbox)  # type: ignore[attr-defined]
     controls.addWidget(top_checkbox)
     layout.addLayout(controls)
 
@@ -116,11 +111,10 @@ def build_left_panel(main: "MainWindow") -> LeftPanelWidgets:
     status_label = QtWidgets.QLabel("未加载时间轴")
     layout.addWidget(status_label)
 
-    roi_button.clicked.connect(lambda: main.ocr_agent.select_roi(main) if getattr(main, "ocr_agent", None) else None)  # type: ignore[arg-type]
-
     return LeftPanelWidgets(
         widget=panel,
         clock_label=clock_label,
+        open_button=open_btn,
         flow_list=flow_list,
         start_btn=start_btn,
         pause_btn=pause_btn,

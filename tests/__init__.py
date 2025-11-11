@@ -1,6 +1,14 @@
 """Test helpers for the PvZ timeline speaker."""
 
+import os
+
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
 from PyQt6 import QtWidgets
+
+_APP = QtWidgets.QApplication.instance()
+if _APP is None:  # pragma: no cover - ensures widgets can be created
+    _APP = QtWidgets.QApplication([])
 
 
 def _return_ok(*_args, **_kwargs) -> QtWidgets.QMessageBox.StandardButton:

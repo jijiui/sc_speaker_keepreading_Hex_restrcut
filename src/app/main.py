@@ -80,15 +80,26 @@ except Exception:  # 未安装或初始化失败
 
 # PyQt6 为必需依赖，如缺失应直接报错提示安装
 from PyQt6 import QtCore, QtGui, QtWidgets
-import time
-from app.infra.ocr.qt_ocr_agent import OcrTimerAgent, Roi, parse_roi_string
 from app.core.domain import TimelineEvent, parse_time_to_ms, format_ms_to_clock
 from app.core.ports import PreferenceStore, TimelineRepository, SpeechPort, TimeSourcePort
 from app.core.services import TimelineService
+from app.actions import build_file_actions, toggle_always_on_top
+from app.controllers import TimelineController, OcrController
 from app.infra.file_repository import FileTimelineRepository
 from app.infra.qsettings_store import QtPreferenceStore
 from app.ui.components import build_left_panel, build_mini_toolbar, build_right_panel
 from app.ui.state import UiStateController
+from app.ui.bindings import (
+    LeftPanelCallbacks,
+    MenuCallbacks,
+    MenuActions,
+    MiniToolbarCallbacks,
+    ShortcutCallbacks,
+    bind_left_panel,
+    bind_mini_toolbar,
+    setup_menus,
+    setup_shortcuts,
+)
 
 # ===========================================================
 # 表格模型：将事件列表绑定到 QTableView
@@ -362,10 +373,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self.model: Optional[TimelineModel] = None
         self._last_tick: float = 0.0
 
+        self.file_actions = build_file_actions(self, self.load_timeline)
+
         # 100ms 刷新时钟与播报判定
         self.timer = QtCore.QTimer(self)
         self.timer.setInterval(100)
-        self.timer.timeout.connect(self._on_tick)
 
         # 语音线程/端口
         self._owns_speech = speech_port is None
@@ -374,7 +386,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.tts.start()
 
         # 构建 UI
-        self._build_ui()
+        self._build_ui(time_source)
         self._mini_mode = False
         self._before_mini_geometry: Optional[QtCore.QRect] = None
         self._prev_window_flags: Optional[QtCore.Qt.WindowFlags] = None
@@ -394,6 +406,34 @@ class MainWindow(QtWidgets.QMainWindow):
             if w is not None:
                 w.installEventFilter(self)
 
+        self.timeline_controller = TimelineController(
+            parent=self,
+            timeline=self.timeline,
+            speech=self.tts,
+            ui_state=self.ui_state,
+            timer=self.timer,
+            model_provider=lambda: self.model,
+            table_provider=lambda: self.table,
+            mini_mode_provider=lambda: self.act_mini.isChecked(),
+        )
+        self.timer.timeout.connect(self.timeline_controller.on_tick)
+
+        self.ocr_controller = OcrController(
+            parent=self,
+            timeline=self.timeline,
+            prefs=self.prefs,
+            auto_checkbox=self.auto_chk,
+            roi_edit=self.roi_edit,
+            roi_button=self.roi_btn,
+            ocr_label=self.ocr_seen_lbl,
+            clock_label=self.clock_lbl,
+            on_time_checkbox=self.on_time_chk,
+            early_checkbox=self.early_chk,
+            time_source=time_source,
+        )
+        self.ocr_controller.bind_timeline_controller(self.timeline_controller)
+        self.timeline_controller.set_ocr_controller(self.ocr_controller)
+
     # ---------- 生命周期 ----------
     def closeEvent(self, event: QtGui.QCloseEvent):
         # 退出时优雅停止 TTS 线程
@@ -404,7 +444,7 @@ class MainWindow(QtWidgets.QMainWindow):
         super().closeEvent(event)
 
     # ---------- UI 构建 ----------
-    def _build_ui(self):
+    def _build_ui(self, time_source: Optional[TimeSourcePort]):
         central = QtWidgets.QWidget()
         self.setCentralWidget(central)
         layout = QtWidgets.QHBoxLayout(central)
@@ -417,6 +457,7 @@ class MainWindow(QtWidgets.QMainWindow):
         left_widgets = build_left_panel(self)
         self.left_panel = left_widgets.widget
         self.clock_lbl = left_widgets.clock_label
+        self.open_btn = left_widgets.open_button
         self.flow_list = left_widgets.flow_list
         self.start_btn = left_widgets.start_btn
         self.pause_btn = left_widgets.pause_btn
@@ -432,16 +473,21 @@ class MainWindow(QtWidgets.QMainWindow):
         self.status_lbl = left_widgets.status_label
         self.splitter.addWidget(self.left_panel)
 
+        bind_left_panel(
+            left_widgets,
+            LeftPanelCallbacks(
+                on_open_file=self.file_actions.open_timeline,
+                on_flow_double_clicked=self.on_flow_double_clicked,
+                on_start=lambda: self.timeline_controller.start() if hasattr(self, "timeline_controller") else None,
+                on_pause=lambda: self.timeline_controller.pause() if hasattr(self, "timeline_controller") else None,
+                on_reset=lambda: self.timeline_controller.reset() if hasattr(self, "timeline_controller") else None,
+                on_top_toggled=self._sync_on_top_from_checkbox,
+                on_roi_button=self._handle_roi_button,
+            ),
+        )
+
         self.lead_spin.setValue(self.timeline.global_lead_ms / 1000.0)
         self.lead_spin.valueChanged.connect(self._on_lead_changed)
-
-        try:
-            self.start_btn.clicked.connect(lambda: QtCore.QTimer.singleShot(0, self._sync_ocr_agent_enabled))
-            self.pause_btn.clicked.connect(lambda: QtCore.QTimer.singleShot(0, self._sync_ocr_agent_enabled))
-            self.reset_btn.clicked.connect(lambda: QtCore.QTimer.singleShot(0, self._sync_ocr_agent_enabled))
-            self.reset_btn.clicked.connect(lambda: self.ocr_seen_lbl.setText("-"))
-        except Exception:
-            pass
 
         mini_widgets = build_mini_toolbar(self)
         self.mini_toolbar = mini_widgets.widget
@@ -449,8 +495,6 @@ class MainWindow(QtWidgets.QMainWindow):
         self.mini_restore_btn = mini_widgets.restore_button
         self.mini_close_btn = mini_widgets.close_button
         self.mini_size_grip = mini_widgets.size_grip
-        self.mini_restore_btn.clicked.connect(lambda: self.act_mini.setChecked(False))
-        self.mini_close_btn.clicked.connect(self.close)
 
         right_widgets = build_right_panel(self, self.mini_toolbar)
         self.right_panel = right_widgets.widget
@@ -467,49 +511,40 @@ class MainWindow(QtWidgets.QMainWindow):
             countdown_label=self.mini_countdown_lbl,
         )
 
-        # 快捷键：空格切换开始/暂停，R 重置，O 打开文件，T 置顶
-        QtGui.QShortcut(QtGui.QKeySequence("Space"), self, activated=self._toggle_run)
-        QtGui.QShortcut(QtGui.QKeySequence("R"), self, activated=self.reset)
-        QtGui.QShortcut(QtGui.QKeySequence("O"), self, activated=self.open_file)
-        QtGui.QShortcut(QtGui.QKeySequence("T"), self, activated=self._toggle_always_on_top)
-        QtGui.QShortcut(QtGui.QKeySequence("Esc"), self, activated=self._leave_mini_if_needed)
+        self._shortcuts = setup_shortcuts(
+            self,
+            ShortcutCallbacks(
+                toggle_run=lambda: self.timeline_controller.toggle_run() if hasattr(self, "timeline_controller") else None,
+                reset=lambda: self.timeline_controller.reset() if hasattr(self, "timeline_controller") else None,
+                open_file=self.file_actions.open_timeline,
+                toggle_always_on_top=self._toggle_always_on_top,
+                exit_mini=self._leave_mini_if_needed,
+            ),
+        )
 
-        # 菜单栏
-        bar = self.menuBar()
-        file_menu = bar.addMenu("文件")
+        menu_actions = setup_menus(
+            self,
+            self.top_chk,
+            MenuCallbacks(
+                open_file=self.file_actions.open_timeline,
+                export_sample=self.file_actions.export_sample,
+                quit_app=self.close,
+                toggle_mini_mode=self._set_mini_mode,
+                toggle_left_panel=self._set_left_panel_visible,
+                toggle_on_top=self._apply_always_on_top,
+            ),
+        )
+        self.act_mini = menu_actions.mini_mode
+        self.act_toggle_left = menu_actions.toggle_left_panel
+        self.act_top = menu_actions.toggle_on_top
 
-        act_open = QtGui.QAction("打开…", self)
-        act_open.triggered.connect(self.open_file)
-        file_menu.addAction(act_open)
-
-        act_sample = QtGui.QAction("导出示例 CSV…", self)
-        act_sample.triggered.connect(self.export_sample_csv)
-        file_menu.addAction(act_sample)
-
-        act_quit = QtGui.QAction("退出", self)
-        act_quit.triggered.connect(self.close)
-        file_menu.addAction(act_quit)
-
-        view_menu = bar.addMenu("视图")
-        self.act_mini = QtGui.QAction("极简小窗模式", self, checkable=True)
-        self.act_mini.toggled.connect(self._set_mini_mode)
-        view_menu.addAction(self.act_mini)
-        view_menu.addSeparator()
-        self.act_toggle_left = QtGui.QAction("显示左侧控制区", self, checkable=True, checked=True)
-        self.act_toggle_left.toggled.connect(self._set_left_panel_visible)
-        view_menu.addAction(self.act_toggle_left)
-        self.act_top = QtGui.QAction("窗口置顶", self, checkable=True)
-        self.act_top.toggled.connect(self._apply_always_on_top)
-        # 与工具区复选框联动，保持显示一致
-        self.act_top.toggled.connect(self.top_chk.setChecked)
-        view_menu.addAction(self.act_top)
-        # 初始化 OCR 自动计时模块（UI 已构建完成）
-        self.ocr_agent: Optional[TimeSourcePort] = None
-        try:
-            self._init_ocr_agent(time_source)
-        except Exception:
-            self.ocr_agent = None
-
+        bind_mini_toolbar(
+            mini_widgets,
+            MiniToolbarCallbacks(
+                on_restore=lambda: self.act_mini.setChecked(False),
+                on_close=self.close,
+            ),
+        )
         QtCore.QTimer.singleShot(
             0, lambda: self.splitter.setSizes([320, max(360, self.width() - 320)])
         )
@@ -551,6 +586,10 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.ui_state.set_status(f"已加载：{path.name}（{len(flows)} 个流程）")
 
+    def _read_flows_from_file(self, path: Path):
+        """Delegate file parsing to the injected repository."""
+        return self.repository.load(path)
+
     # ---------- 切换流程/双击开始 ----------
     def _set_active_flow(self, name: str):
         """根据流程名切换当前事件表，并自动重置计时。"""
@@ -569,11 +608,17 @@ class MainWindow(QtWidgets.QMainWindow):
         if "note" in self.model._columns:
             col_idx = self.model._columns.index("note")
             self.table.setColumnWidth(col_idx, 420)
-        self.reset()  # 加载新流程后，自动重置为 0:00
+        if hasattr(self, "timeline_controller"):
+            self.timeline_controller.reset()
 
     def on_flow_double_clicked(self, item: QtWidgets.QListWidgetItem):
         self._set_active_flow(item.text())
-        self.start()  # 双击即开跑（符合“点流程立即开始”的习惯）
+        if hasattr(self, "timeline_controller"):
+            self.timeline_controller.start()  # 双击即开跑
+
+    def _handle_roi_button(self) -> None:
+        if hasattr(self, "ocr_controller"):
+            self.ocr_controller.select_roi()
 
     # ---------- 控制区：开始/暂停/重置 ----------
     def _on_lead_changed(self, val: float):
@@ -581,111 +626,28 @@ class MainWindow(QtWidgets.QMainWindow):
         self.timeline.set_global_lead(int(val * 1000))
 
     def _toggle_run(self):
-        """空格：开始 ↔ 暂停。"""
-        if self.timeline.running:
-            self.pause()
-        else:
-            self.start()
+        if hasattr(self, "timeline_controller"):
+            self.timeline_controller.toggle_run()
 
     def start(self):
-        """开始计时。若尚未加载流程，提示用户。"""
-        if not self.model:
-            QtWidgets.QMessageBox.information(self, "提示", "请先加载一个时间轴流程。")
-            return
-        try:
-            self.timeline.start()
-        except RuntimeError as exc:
-            QtWidgets.QMessageBox.information(self, "提示", str(exc))
-            return
-        self.timer.start()
-        self.ui_state.set_status(f"运行中：{self.timeline.current_flow_name or '--'}")
-        self._last_tick = time.perf_counter()
-        self.ocr_locked = False
-        self._sync_ocr_agent_enabled()
+        if hasattr(self, "timeline_controller"):
+            self.timeline_controller.start()
 
     def pause(self):
-        """暂停计时。"""
-        if not self.timeline.running:
-            return
-        self.timeline.pause()
-        self.timer.stop()
-        self.ui_state.set_status("已暂停")
-        self._last_tick = 0.0
-        self.ocr_locked = False
-        self._sync_ocr_agent_enabled()
+        if hasattr(self, "timeline_controller"):
+            self.timeline_controller.pause()
 
     def reset(self):
-        """重置计时并清空播报队列。"""
-        self.timeline.reset()
-        self.timer.stop()
-        self._last_tick = 0.0
-        self.ocr_locked = False
-        try:
-            if hasattr(self, 'tts') and self.tts:
-                self.tts.clear_queue()
-        except Exception:
-            pass
-        self._update_clock()
-        self.ui_state.set_status("已重置")
-        self._sync_ocr_agent_enabled()
+        if hasattr(self, "timeline_controller"):
+            self.timeline_controller.reset()
 
-    # ---------- 计时心跳 ----------
-    def _on_tick(self):
-        """每 100ms 调用：推进时间、更新显示、处理播报。"""
-        if not self.timeline.running or not self.model:
-            return
-        if self._handle_auto_mode():
-            return
-        now = time.perf_counter()
-        if not hasattr(self, '_last_tick') or not self._last_tick:
-            self._last_tick = now
-            return
-        delta_ms = max(0, int((now - self._last_tick) * 1000))
-        self._last_tick = now
-        decision = self.timeline.advance(delta_ms)
-        self._update_clock()
-        self._handle_decision(decision)
-
-    def _handle_auto_mode(self) -> bool:
-        """Auto OCR mode hijacks ticks; return True when manual advance should skip."""
-        try:
-            auto_enabled = hasattr(self, 'auto_chk') and self.auto_chk.isChecked()
-        except Exception:
-            auto_enabled = False
-        if not auto_enabled:
-            return False
-        ocr_agent = getattr(self, 'ocr_agent', None)
-        ocr_enabled = bool(ocr_agent and ocr_agent.is_enabled())
-        ocr_locked = bool(getattr(self, 'ocr_locked', False))
-        if (not ocr_enabled) or (not ocr_locked):
-            try:
-                self.clock_lbl.setText("没检测到")
-            except Exception:
-                pass
-            self._last_tick = time.perf_counter()
-            return True
-        self._update_clock()
-        self._last_tick = time.perf_counter()
-        return True
-
-    def _handle_decision(self, decision):
-        if not decision:
-            return
-        self._speak(decision.event.action)
-
-    def _update_clock(self):
-        """刷新大时钟，并滚动表格定位到“下一条未播事件”。"""
-        self.ui_state.update_clock(self.model, self.table, self.act_mini.isChecked())
-
-    # ---------- 播报封装 ----------
     def _speak(self, text: str):
-        """统一入口：将文本交给 TTS 线程；若失败则蜂鸣+打印。"""
         if not text.strip():
             return
         try:
             self.tts.speak(text)
         except Exception:
-            print(f"[TTS 调用失败] {text}")
+            print(f"[TTS failure] {text}")
             QtWidgets.QApplication.beep()
 
     # ---------- 置顶窗口 ----------
@@ -693,14 +655,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.act_top.toggle()
 
     def _apply_always_on_top(self, enabled: bool):
-        # 通过窗口标志位实现置顶/取消置顶
-        flags = self.windowFlags()
-        if enabled:
-            self.setWindowFlag(QtCore.Qt.WindowType.WindowStaysOnTopHint, True)
-        else:
-            self.setWindowFlag(QtCore.Qt.WindowType.WindowStaysOnTopHint, False)
-        self.setWindowFlags(self.windowFlags())
-        self.show()
+        toggle_always_on_top(self, enabled)
 
     # ---------- 导出示例 CSV ----------
     def _sync_on_top_from_checkbox(self, enabled: bool):
@@ -792,145 +747,6 @@ class MainWindow(QtWidgets.QMainWindow):
                 if getattr(event, "button", lambda: None)() == QtCore.Qt.MouseButton.LeftButton:
                     self._dragging = False
         return super().eventFilter(obj, event)
-
-    # ---------- OCR 自动计时（初始化与桥接） ----------
-    def _init_ocr_agent(self, time_source: Optional[TimeSourcePort]):
-        self.ocr_agent: TimeSourcePort = time_source or OcrTimerAgent(
-            self,
-            interval_ms=200,
-            scale=3,
-            score_thresh=0.55,
-        )
-        # 初始未锁定识别
-        self.ocr_locked = False
-
-        # Restore settings
-        try:
-            roi_str = self.prefs.get_str("ocr/roi", "")
-        except Exception:
-            roi_str = ""
-        if roi_str:
-            if self.ocr_agent.set_roi_from_string(roi_str):
-                self.roi_edit.setText(roi_str)
-        try:
-            auto_on = self.prefs.get_bool("ocr/auto", False)
-        except Exception:
-            auto_on = False
-        self.auto_chk.setChecked(auto_on)
-
-        # Restore broadcast options
-        try:
-            on_time_on = self.prefs.get_bool("opt/on_time", True)
-        except Exception:
-            on_time_on = True
-        try:
-            early_on = self.prefs.get_bool("opt/early", False)
-        except Exception:
-            early_on = False
-        try:
-            self.on_time_chk.setChecked(on_time_on)
-            self.early_chk.setChecked(early_on)
-        except Exception:
-            pass
-        self.timeline.on_time_enabled = bool(on_time_on)
-        self.timeline.early_enabled = bool(early_on)
-
-        # Wire signals
-        self.roi_btn.clicked.connect(lambda: self.ocr_agent.select_roi(self))
-        self.roi_edit.editingFinished.connect(self._on_roi_edit_changed)
-        self.auto_chk.toggled.connect(self._on_auto_chk_toggled)
-        self.ocr_agent.roiSelected.connect(self._on_roi_selected)
-        self.ocr_agent.timeDetected.connect(self._on_ocr_time_detected)
-        # Save broadcast options
-        try:
-            self.on_time_chk.toggled.connect(lambda v: self._on_broadcast_option_toggled("on_time", v))
-            self.early_chk.toggled.connect(lambda v: self._on_broadcast_option_toggled("early", v))
-        except Exception:
-            pass
-
-        # Initial enable sync
-        self._sync_ocr_agent_enabled()
-
-    def _on_roi_edit_changed(self):
-        if not getattr(self, 'ocr_agent', None):
-            return
-        text = self.roi_edit.text().strip()
-        ok = self.ocr_agent.set_roi_from_string(text)
-        if ok:
-            self.prefs.set_str("ocr/roi", text)
-            # ROI 变化后需重新锁定
-            self.ocr_locked = False
-        self._sync_ocr_agent_enabled()
-
-    def _on_roi_selected(self, x: int, y: int, w: int, h: int):
-        if not getattr(self, 'ocr_agent', None):
-            return
-        s = f"{x},{y},{w},{h}"
-        self.roi_edit.setText(s)
-        self.prefs.set_str("ocr/roi", s)
-        # ROI 变化后需重新锁定
-        self.ocr_locked = False
-        self._sync_ocr_agent_enabled()
-
-    def _on_auto_chk_toggled(self, enabled: bool):
-        self.prefs.set_bool("ocr/auto", bool(enabled))
-        # 切换自动计时后重新锁定
-        self.ocr_locked = False
-        self._sync_ocr_agent_enabled()
-
-    def _on_broadcast_option_toggled(self, option: str, value: bool):
-        enabled = bool(value)
-        if option == "on_time":
-            self.timeline.on_time_enabled = enabled
-            self.prefs.set_bool("opt/on_time", enabled)
-        else:
-            self.timeline.early_enabled = enabled
-            self.prefs.set_bool("opt/early", enabled)
-
-    def _sync_ocr_agent_enabled(self):
-        # Enabled when: user checked + currently running + ROI valid
-        if not getattr(self, 'ocr_agent', None):
-            return
-        want = False
-        try:
-            roi = self.ocr_agent.get_roi()  # type: ignore[union-attr]
-            want = bool(
-                self.auto_chk.isChecked()
-                and self.timeline.running
-                and roi is not None
-                and roi.is_valid()
-            )
-        except Exception:
-            want = False
-        try:
-            self.ocr_agent.set_enabled(want)  # type: ignore[union-attr]
-        except Exception:
-            pass
-
-    def _on_ocr_time_detected(self, time_text: str, ms: int):
-        if not getattr(self, 'ocr_agent', None):
-            return
-        # Update label always
-        try:
-            self.ocr_seen_lbl.setText(time_text)
-        except Exception:
-            pass
-        # Only drive announcements when running
-        if not self.timeline.running:
-            return
-        # 锁定：后续 tick 由 OCR 驱动
-        # 首次锁定：对齐 prev_ms，避免锚定瞬间触发提前播报
-        if not getattr(self, 'ocr_locked', False):
-            self.ocr_locked = True
-            self.timeline.prime_elapsed(ms)
-            self._update_clock()
-            self._last_tick = time.perf_counter()
-            return
-        self.ocr_locked = True
-        decision = self.timeline.sync_elapsed(ms)
-        self._update_clock()
-        self._handle_decision(decision)
-        self._last_tick = time.perf_counter()
 
     def export_sample_csv(self):
         """导出一份示例时间轴 CSV（含 PvZ 方案B 的节点）。"""
