@@ -3,6 +3,8 @@
 在本仓库运行任何需要依赖 Python 环境的命令前，必须先激活虚拟环境，并按规则维护任务日志。
 
 ## 虚拟环境激活流程
+- Always edit/save files in UTF-8 (without BOM) and ensure no tool converts text to another codepage before committing.
+- Before writing any code, run the standard test suite once; only proceed when it passes (or document/resolve failures).
 
 1. **定位 `.venv` 目录**
    - 先检查当前工作目录是否存在 `.venv`。
@@ -21,8 +23,10 @@
 ## 提交与版本控制
 
 - 每完成一个可验证的小任务并通过相应测试后，必须立即 `git commit` 保存成果，确保提交粒度清晰、可追溯。
+- 将“可验证的小任务”具体落实到计划中的最小任务单元（例如 Stage A 的 A1/A2/A3 等），也就是说每完成一个阶段内的单个编号任务并验证通过，就要单独提交一次。
 - 代码注释一律使用英文撰写；UI 显示文本可保留原语言，但注释不得混用中文。
 - 新建任何文件时，必须在文件头部添加英文注释，说明该文件的职责/用途。后续修改文件时，需检查并更新该头部注释，确认是否仍准确；顺带审视文件中是否存在过时代码（obsoleted code），若发现则一并清理。
+- After finishing every task, double-check all agent.md requirements are satisfied; fill any gaps before concluding and include a reply table summarizing each requirement and its completion status.
 
 ## 任务日志与文档规则
 
@@ -35,3 +39,5 @@
 ### 设计/开发文档命名
 - 前导说明（instruction）、衍生的 plan、进一步的任务单（tasks）必须使用统一命名：`docs/<folder>/<YYYY-MM-DD>-<task-name>-instruction|plan|tasks.md`。
 - 三者必须放在同一文件夹（例如 `docs/plan/`），并沿用相同的 `<YYYY-MM-DD>-<task-name>` 前缀，便于检索与追踪。
+
+
