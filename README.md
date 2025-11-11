@@ -84,9 +84,4 @@ Need orientation? Start by reading:
 | --- | --- |
 | Agent Alex (2025-11-09 16:30:00-22:45:00 UTC+08:00) | Migrated codebase to `src/app` layout, added repository tests + CI workflow, updated README/run scripts, documented Stage 0 reruns, and published refactor instruction/plan/tasks for upcoming Main UI split. |
 | Agent Noname (2025-11-09 22:45:00- 2025-11-10 00:00:30 UTC+08:00) | updated README, finished A1 and published. |
-
-
-
 | Evan (2025-11-11 12:30:00 UTC+01:00) | Added encoding guards, mocked Qt dialogs in tests, and clarified Stage-0 behavior. |
-
-> Note: During automated tests (Stage-0), QFileDialog is monkeypatched so the sample CSV saves directly into a temp folder—only the interactive UI prompts for a path.
