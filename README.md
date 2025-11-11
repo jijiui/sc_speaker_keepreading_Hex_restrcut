@@ -84,4 +84,5 @@ Need orientation? Start by reading:
 | --- | --- |
 | Agent Alex (2025-11-09 16:30:00-22:45:00 UTC+08:00) | Migrated codebase to `src/app` layout, added repository tests + CI workflow, updated README/run scripts, documented Stage 0 reruns, and published refactor instruction/plan/tasks for upcoming Main UI split. |
 | Agent Noname (2025-11-09 22:45:00- 2025-11-10 00:00:30 UTC+08:00) | updated README, finished A1 and published. |
-| Evan (2025-11-11 12:30:00 UTC+01:00) | Added encoding guards, mocked Qt dialogs in tests, and clarified Stage-0 behavior. |
+| Evan (2025-11-11 12:48:29 UTC+01:00) | Reverted tree to 266a466 baseline (keeping README/agent) and reran unit/stage0/smoke suites. |
+| Evan (2025-11-11 14:20:00 UTC+01:00) | Added encoding guards, mocked Qt dialogs in tests, and clarified Stage-0 behavior. |
