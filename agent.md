@@ -5,6 +5,8 @@
 ## 虚拟环境激活流程
 - Always edit/save files in UTF-8 (without BOM) and ensure no tool converts text to another codepage before committing.
 - Before writing any code, run the standard test suite once; only proceed when it passes (or document/resolve failures).
+- 所有回复/工作汇报必须使用中文（代码、命令片段可保持原语言）。
+- 回复中不得出现连续空白行（禁止连续两次换行）；文档可按正常 Markdown 排版。
 
 1. **定位 `.venv` 目录**
    - 先检查当前工作目录是否存在 `.venv`。
