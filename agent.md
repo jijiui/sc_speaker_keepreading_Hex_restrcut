@@ -24,7 +24,7 @@
 
 ## 提交与版本控制
 
-- 每完成一个可验证的小任务并通过相应测试后，必须立即 `git commit` 保存成果，确保提交粒度清晰、可追溯。
+- 每完成一个可验证的小任务并通过相应测试后，在满足“合规自检 + 获得 reviewer 明确确认”这两项条件后才能 `git commit`，确保提交粒度清晰且已获复核。
 - Before making any commit, rerun the required test suite (unit + Stage0 + smoke as applicable) and record the commands/results in your response or log entry.
 - 将“可验证的小任务”具体落实到计划中的最小任务单元（例如 Stage A 的 A1/A2/A3 等），也就是说每完成一个阶段内的单个编号任务并验证通过，就要单独提交一次。
 - 代码注释一律使用英文撰写；UI 显示文本可保留原语言，但注释不得混用中文。
