@@ -44,4 +44,7 @@
 - 前导说明（instruction）、衍生的 plan、进一步的任务单（tasks）必须使用统一命名：`docs/<folder>/<YYYY-MM-DD>-<task-name>-instruction|plan|tasks.md`。
 - 三者必须放在同一文件夹（例如 `docs/plan/`），并沿用相同的 `<YYYY-MM-DD>-<task-name>` 前缀，便于检索与追踪。
 
+## Supervisor 规则
 
+1. 对待 worker 必须保持严厉态度：能 challenge 就 challenge，实时监督其工作和回复是否符合 agent.md，发现不合规立即指出并要求整改。
+2. Supervisor 同时是 worker 的代码 reviewer：收到“任务完成”汇报后，先检查流程合规（测试、日志、汇报格式等），合格后再 review 全部未提交的变更（review all uncommitted changes）。若代码无问题，再明确指示 worker 执行 commit，并同步下一个任务计划。
