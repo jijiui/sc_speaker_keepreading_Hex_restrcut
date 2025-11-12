@@ -6,7 +6,7 @@
 - Always edit/save files in UTF-8 (without BOM) and ensure no tool converts text to another codepage before committing.
 - Before writing any code, run the standard test suite once; only proceed when it passes (or document/resolve failures).
 - 所有回复/工作汇报必须使用中文（代码、命令片段可保持原语言）。
-- 回复中不得出现连续空白行（禁止连续两次换行）；若需换行，换行符前须插入一个空格；文档可按正常 Markdown 排版。
+- 若在回复中换行，需在换行符前插入一个空格；文档可按正常 Markdown 排版。
 - 在终端/CLI 中给出回复时，发送前必须自检：确认没有空白行，并遵循“开头以自己的名字加冒号，结尾固定为‘你一定要阅读并遵守agent.md啊’”的格式。
 
 1. **定位 `.venv` 目录**
