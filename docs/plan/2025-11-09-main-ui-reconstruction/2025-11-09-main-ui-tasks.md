@@ -6,7 +6,7 @@
 | # | Task | Rationale | Test Plan |
 | --- | --- | --- | --- |
 | A1 | 在 `src/app/ui/components.py` 中补充/重构 builder，确保左/右/迷你面板返回结构体，移除 `main.py` 中的控件创建代码 | 统一控件构造，降低 MainWindow 体积 | 运行 `python -m unittest tests.test_timeline_service tests.test_file_repository`；执行 UC-01/UC-06 冒烟（`python scripts/manual_regression_stage0.py`，至少到 UC-06） |
-| A2 | 新建 `src/app/ui/bindings.py`，集中快捷键、菜单、按钮与 OCR enable 等信号绑定；MainWindow 通过函数注入 | 避免信号分散，方便审计 | 同 A1；额外手动验证快捷键（Space/R/O/T）在 `python -m app.main` 下仍生效 |
+| A2 | 新建 `src/app/ui/bindings.py`，集中快捷键、菜单、按钮与 OCR enable 等信号绑定；MainWindow 通过函数注入 | 避免信号分散，方便审计 | 同 A1；额外手动验证快捷键（Space/R/O/T）在现行入口 `python -m app.bootstrap` 下仍生效 |
 | A3 | 复用 `UiStateController` 更新状态文本/倒计时，删除 `main.py` 中重复逻辑 | 防止状态更新散落 | `python scripts/manual_regression_stage0.py` 至少覆盖 UC-03/UC-07 |
 
 **Stage A 验证**：  

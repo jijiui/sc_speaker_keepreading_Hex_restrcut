@@ -12,7 +12,7 @@
 ## 目录映射与 rationale
 | 现有路径 | 目标路径 | Rationale |
 | --- | --- | --- |
-| `pv_z_时间轴播报器（python_py_qt_6_）.py` | `src/app/main.py` | 主程序和入口脚本应放在 `src/app/`，统一命名后便于 `python -m app.main` 启动。
+| `pv_z_时间轴播报器（python_py_qt_6_）.py` | `src/app/main.py` | 主程序和入口脚本应放在 `src/app/`，统一命名后便于 `python -m app.bootstrap`（原 `python -m app.main`）启动。
 | `opencv_timer_agent.py` | `src/infra/ocr/qt_ocr_agent.py` | OCR 适配器属于基础设施层，放到 infra/ocr 子包，命名更语义化。
 | `opencv_timer_core.py` | `src/infra/ocr/opencv_core.py` | OCR 内部工具与 `opencv_timer_agent` 同属 infra 层，保持同级。
 | `core/` | `src/core/` | 领域模型/服务包移入 `src/`，与其他代码并列。

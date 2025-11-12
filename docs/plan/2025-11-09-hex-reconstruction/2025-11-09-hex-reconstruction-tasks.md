@@ -41,7 +41,7 @@
 | --- | --- | --- |
 | 4.1 | 为仓储、偏好、端口适配器编写单元测试（含样例文件） | `tests/test_infra_*` |
 | 4.2 | 配置 CI（GitHub Actions 或等价）运行 lint + tests | `.github/workflows/ci.yml` |
-| 4.3 | 提供统一入口脚本（如 `python -m app` 或 `make run`） | 运行脚本/README 更新 |
+| 4.3 | 提供统一入口脚本（如 `python -m app.bootstrap` 或 `make run`） | 运行脚本/README 更新 |
 
 ## 阶段 5：功能验证
 | # | 任务 | 关键输出 |

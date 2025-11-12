@@ -25,7 +25,7 @@ SRC_DIR = ROOT / "src"
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
-from app.main import MainWindow  # type: ignore  # noqa: E402
+from app import bootstrap  # type: ignore  # noqa: E402
 from app.infra.ocr import qt_ocr_agent as ocr_agent_mod  # type: ignore  # noqa: E402
 
 
@@ -108,32 +108,54 @@ def _run_uc03(window, events: List[Any]) -> UCResult:
 
 
 def _run_uc04() -> UCResult:
-    has_cv = getattr(ocr_agent_mod, "_HAS_CV", False)
+    has_cv = getattr(ocr_agent_mod, '_HAS_CV', False)
     agent = ocr_agent_mod.OcrTimerAgent()
     roi = ocr_agent_mod.Roi(0, 0, 120, 50)
     agent.set_roi(roi)
     agent.set_enabled(True)
     if has_cv and agent.is_enabled():
         agent.set_enabled(False)
-        return UCResult("UC-04", "PASS", "OCR Agent 可开启并监听 ROI")
+        return UCResult('UC-04', 'PASS', 'OCR Agent 可开启并监听 ROI')
     agent.set_enabled(False)
     return UCResult(
-        "UC-04",
-        "BLOCKED",
-        "OpenCV/NumPy 未就绪，无法启用 OCR 自动计时",
+        'UC-04',
+        'BLOCKED',
+        'OpenCV/NumPy 未就绪，无法启用 OCR 自动计时',
     )
 
 
+def _speech_counter(port) -> tuple[str, int]:
+    if hasattr(port, 'spoken'):
+        spoken = getattr(port, 'spoken')
+        try:
+            return ('headless', len(spoken))
+        except Exception:
+            return ('headless', 0)
+    queue_obj = getattr(port, '_queue', None)
+    if queue_obj is not None and hasattr(queue_obj, 'qsize'):
+        try:
+            return ('queue', queue_obj.qsize())
+        except Exception:
+            return ('queue', 0)
+    return ('unknown', 0)
+
+
 def _run_uc05(window) -> UCResult:
-    before = window.tts._queue.qsize()
-    window._speak("测试播报：确认播报线程可用")
+    mode, before = _speech_counter(window.tts)
+    window._speak('测试播报：确认播报线程可用')
     QtCore.QCoreApplication.processEvents()
     time.sleep(0.2)
     QtCore.QCoreApplication.processEvents()
-    after = window.tts._queue.qsize()
-    if after <= before:
-        return UCResult("UC-05", "PASS", "队列入队并被 TTS 线程消费")
-    return UCResult("UC-05", "FAIL", "播报队列未被清空")
+    _, after = _speech_counter(window.tts)
+    if mode == 'headless':
+        if after > before:
+            return UCResult('UC-05', 'PASS', 'HeadlessSpeechPort 已记录播报文本')
+        return UCResult('UC-05', 'FAIL', 'HeadlessSpeechPort 未记录播报')
+    if mode == 'queue':
+        if after <= before:
+            return UCResult('UC-05', 'PASS', 'TTSWorker 队列已被消费')
+        return UCResult('UC-05', 'FAIL', 'TTSWorker 队列没有被清空')
+    return UCResult('UC-05', 'BLOCKED', '未知 TTS 实现，无法判断结果')
 
 
 def _run_uc06(window, export_path: Path) -> UCResult:
@@ -210,7 +232,7 @@ def _prepare_xlsx(path: Path) -> None:
 def main() -> None:
     _suppress_dialogs()
     app = _ensure_app()
-    window = MainWindow()
+    window = bootstrap.create_main_window(bootstrap.BootstrapConfig(headless=True))
     window.hide()
     results: List[UCResult] = []
     tmp_dir = Path(tempfile.mkdtemp(prefix="pvz_stage0_"))

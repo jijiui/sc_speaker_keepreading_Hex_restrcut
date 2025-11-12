@@ -22,6 +22,6 @@
    - Risk: forgetting documentation → enforce checklist before closing the stage.
 
 ## Exit Criteria
-- `python -m app.main` (or `app.bootstrap` later) runs from `src` namespace.
+- `python -m app.bootstrap`（原 `python -m app.main`）可直接从 `src` 命名空间运行。
 - All scripts/tests use the new import paths.
 - `docs/plan/2025-11-09-src-reorg-*` 和 `docs/重构任务日志.md` 记录完成。

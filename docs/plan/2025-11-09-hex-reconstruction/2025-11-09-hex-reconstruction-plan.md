@@ -84,7 +84,7 @@
    - 配置 GitHub Actions 或其他 CI 工具，执行 `pytest`/`flake8`（或 `ruff`）、`mypy`（若启用）。  
    - 在 CI 中缓存依赖，提高速度。
 3. **打包/运行脚本**  
-   - 提供 `make run` / `python -m app` 等命令，将 DI 初始化与 Qt 启动封装，便于未来替换 UI。
+   - 提供 `make run` / `python -m app.bootstrap` 等命令，将 DI 初始化与 Qt 启动封装，便于未来替换 UI。
 
 ## 阶段 5：功能验证与回归
 1. **回归用例**  
